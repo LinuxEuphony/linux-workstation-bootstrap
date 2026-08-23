@@ -6,9 +6,10 @@
 # Terminal user interface utilities.
 # This file:
 # 1. Manages terminal presentation.
-# 2. Displays detected system information.
-# 3. Handles confirmation prompts.
-# 4. Allows the user to select a distribution profile.
+# 2. Displays application and logging information.
+# 3. Displays detected system information.
+# 4. Handles confirmation prompts.
+# 5. Allows the user to select a distribution profile.
 
 # Clear the terminal when running interactively.
 # Non-interactive output, such as CI logs, is left untouched.
@@ -18,9 +19,45 @@ clear_screen() {
     fi
 }
 
+# Display the log location for the current bootstrap session.
+show_log_location() {
+    printf '  Session log : %s\n' "$LWBS_LOG_FILE"
+    printf '  All logs    : %s\n' "$LWBS_LOG_DIR"
+}
+
+# Display application information when the bootstrap starts.
+show_startup_info() {
+    printf 'Linux Workstation Bootstrap %s\n\n' "$LWBS_VERSION"
+
+    printf 'Logging is enabled for this session.\n'
+    show_log_location
+
+    printf '\n'
+}
+
+# Display application information when the bootstrap completes successfully.
+show_completion_info() {
+    printf '\nBootstrap completed.\n\n'
+
+    printf 'Logs for this run are available at:\n'
+    show_log_location
+
+    printf '\n'
+}
+
+# Display application information when the bootstrap is cancelled.
+show_cancellation_info() {
+    printf '\nBootstrap cancelled.\n\n'
+
+    printf 'Logs for this run are available at:\n'
+    show_log_location
+
+    printf '\n'
+}
+
 # Display the detected system information.
 show_system_summary() {
-    printf '\nDetected system\n\n'
+    printf 'Detected system\n\n'
 
     printf '  Distribution : %s\n' "${SYSTEM_DISTRO_NAME:-unknown}"
     printf '  ID           : %s\n' "${SYSTEM_DISTRO_ID:-unknown}"
