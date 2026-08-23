@@ -27,7 +27,7 @@ show_log_location() {
 
 # Display application information when the bootstrap starts.
 show_startup_info() {
-    printf 'Linux Workstation Bootstrap %s\n\n' "$LWBS_VERSION"
+    printf '%s %s\n\n' "$LWBS_APP_NAME" "$LWBS_VERSION"
 
     printf 'Logging is enabled for this session.\n'
     show_log_location
@@ -55,6 +55,16 @@ show_cancellation_info() {
     printf '\n'
 }
 
+# Display application information when the bootstrap stops due to an error.
+show_failure_info() {
+    printf '\nBootstrap stopped because of an error.\n\n'
+
+    printf 'Logs for this run are available at:\n'
+    show_log_location
+
+    printf '\n'
+}
+
 # Display the detected system information.
 show_system_summary() {
     printf 'Detected system\n\n'
@@ -70,22 +80,10 @@ show_system_summary() {
     printf '\n'
 }
 
-# Return a friendly display name for a supported distribution profile.
+# Return the configured display name for a distribution profile.
 profile_name() {
-    case "$1" in
-        ubuntu)
-            printf 'Ubuntu\n'
-            ;;
-        debian)
-            printf 'Debian\n'
-            ;;
-        kali)
-            printf 'Kali Linux\n'
-            ;;
-        *)
-            printf '%s\n' "$1"
-            ;;
-    esac
+    printf '%s\n' \
+        "${LWBS_DISTRO_DISPLAY_NAMES[$1]:-$1}"
 }
 
 # Ask whether the user wants to use the automatically detected profile.
@@ -110,36 +108,50 @@ confirm_detected_profile() {
 # Prompt the user to manually select a supported distribution profile.
 choose_distro_profile() {
     local choice
+    local distro
+    local index
+    local selected_index
 
     while true; do
         printf '\nSelect a distribution profile:\n\n'
-        printf '  1) Ubuntu\n'
-        printf '  2) Debian\n'
-        printf '  3) Kali Linux\n'
+
+        # Build the menu directly from the configured supported profiles.
+        index=1
+
+        for distro in "${LWBS_SUPPORTED_DISTROS[@]}"; do
+            printf '  %d) %s\n' \
+                "$index" \
+                "$(profile_name "$distro")"
+
+            ((index += 1))
+        done
+
         printf '  q) Exit\n\n'
         printf 'Selection: '
 
         read -r choice
 
         case "${choice,,}" in
-            1 | ubuntu)
-                SELECTED_DISTRO_PROFILE="ubuntu"
-                return 0
-                ;;
-            2 | debian)
-                SELECTED_DISTRO_PROFILE="debian"
-                return 0
-                ;;
-            3 | kali)
-                SELECTED_DISTRO_PROFILE="kali"
-                return 0
-                ;;
             q | quit | exit)
                 return 1
                 ;;
-            *)
-                printf 'Invalid selection. Please try again.\n'
-                ;;
         esac
+
+        # Allow either the menu number or the distribution ID.
+        if [[ "$choice" =~ ^[0-9]+$ ]]; then
+            selected_index=$((10#$choice - 1))
+
+            if ((selected_index >= 0 &&
+                selected_index < ${#LWBS_SUPPORTED_DISTROS[@]})); then
+                SELECTED_DISTRO_PROFILE="${LWBS_SUPPORTED_DISTROS[$selected_index]}"
+                return 0
+            fi
+
+        elif is_supported_distro "${choice,,}"; then
+            SELECTED_DISTRO_PROFILE="${choice,,}"
+            return 0
+        fi
+
+        printf 'Invalid selection. Please try again.\n'
     done
 }

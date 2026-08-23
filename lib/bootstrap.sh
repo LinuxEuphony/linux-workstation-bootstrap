@@ -5,15 +5,24 @@
 #
 # Main application bootstrap.
 # This file:
-# 1. Loads the application components.
+# 1. Loads application configuration and components.
 # 2. Initializes application logging.
-# 3. Coordinates system detection.
-# 4. Determines the distribution profile to use.
-# 5. Controls the main bootstrap execution flow.
+# 3. Validates the runtime environment.
+# 4. Coordinates system detection.
+# 5. Determines the distribution profile to use.
+# 6. Controls the main bootstrap execution flow.
+
+# Load default application configuration.
+# shellcheck source=../config/defaults.sh
+source "$LWBS_ROOT/config/defaults.sh"
 
 # Load application logging utilities.
 # shellcheck source=./logging.sh
 source "$LWBS_ROOT/lib/logging.sh"
+
+# Load core application utilities.
+# shellcheck source=./core.sh
+source "$LWBS_ROOT/lib/core.sh"
 
 # Load system detection utilities.
 # shellcheck source=./detect.sh
@@ -22,9 +31,6 @@ source "$LWBS_ROOT/lib/detect.sh"
 # Load terminal user interface utilities.
 # shellcheck source=./ui.sh
 source "$LWBS_ROOT/lib/ui.sh"
-
-# Current development version of Linux Workstation Bootstrap.
-readonly LWBS_VERSION="0.1.0-dev"
 
 # Distribution profile selected for the current bootstrap session.
 SELECTED_DISTRO_PROFILE=""
@@ -35,16 +41,27 @@ bootstrap_main() {
     # Start each interactive bootstrap session with a clean terminal.
     clear_screen
 
-    # Create a dedicated log file for this bootstrap session.
+    # Create a dedicated log file before bootstrap processing begins.
     init_logging
 
-    # Show application and logging information before any processing begins.
+    # Show application and logging information immediately.
     show_startup_info
 
-    log_info "Linux Workstation Bootstrap $LWBS_VERSION started."
+    log_info "$LWBS_APP_NAME $LWBS_VERSION started."
 
-    # Detect the host operating system before selecting a bootstrap profile.
-    detect_system
+    # Validate the environment before performing system operations.
+    if ! validate_runtime; then
+        log_error "Runtime validation failed."
+        show_failure_info
+        return 1
+    fi
+
+    # Detect the host operating system and architecture.
+    if ! detect_system; then
+        log_error "System detection failed."
+        show_failure_info
+        return 1
+    fi
 
     log_info \
         "Detected system: distro=$SYSTEM_DISTRO_ID version=$SYSTEM_DISTRO_VERSION codename=$SYSTEM_DISTRO_CODENAME architecture=$SYSTEM_ARCH family=$SYSTEM_DISTRO_FAMILY package_manager=$SYSTEM_PACKAGE_MANAGER"
@@ -71,30 +88,17 @@ bootstrap_main() {
 
 # Determine which supported distribution profile should be used.
 select_distro_profile() {
-    # Use the detected distribution directly when it is supported
-    # and the user confirms the selection.
+    # Use the detected distribution when it is supported and confirmed.
     if is_supported_distro "$SYSTEM_DISTRO_ID" &&
         confirm_detected_profile; then
         SELECTED_DISTRO_PROFILE="$SYSTEM_DISTRO_ID"
         return 0
     fi
 
-    # Fall back to manual selection when the detected profile is
-    # unsupported or the user chooses not to use it.
+    # Fall back to manual profile selection.
     if ! choose_distro_profile; then
-        printf 'Bootstrap cancelled.\n'
         return 1
     fi
-}
 
-# Check whether a distribution currently has a supported profile.
-is_supported_distro() {
-    case "$1" in
-        ubuntu | debian | kali)
-            return 0
-            ;;
-        *)
-            return 1
-            ;;
-    esac
+    return 0
 }
