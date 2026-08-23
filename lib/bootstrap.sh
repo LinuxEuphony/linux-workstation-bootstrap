@@ -38,6 +38,9 @@ bootstrap_main() {
     # Create a dedicated log file for this bootstrap session.
     init_logging
 
+    # Show application and logging information before any processing begins.
+    show_startup_info
+
     log_info "Linux Workstation Bootstrap $LWBS_VERSION started."
 
     # Detect the host operating system before selecting a bootstrap profile.
@@ -48,9 +51,10 @@ bootstrap_main() {
 
     show_system_summary
 
-    # A cancelled profile selection is a normal exit, not an application error.
+    # A cancelled profile selection is treated as a normal application exit.
     if ! select_distro_profile; then
         log_info "Bootstrap cancelled by user."
+        show_cancellation_info
         return 0
     fi
 
@@ -60,6 +64,9 @@ bootstrap_main() {
         "$(profile_name "$SELECTED_DISTRO_PROFILE")"
 
     log_info "Bootstrap foundation completed."
+
+    # Show completion information and the session log location.
+    show_completion_info
 }
 
 # Determine which supported distribution profile should be used.
