@@ -6,9 +6,14 @@
 # Main application bootstrap.
 # This file:
 # 1. Loads the application components.
-# 2. Coordinates system detection.
-# 3. Determines the distribution profile to use.
-# 4. Controls the main bootstrap execution flow.
+# 2. Initializes application logging.
+# 3. Coordinates system detection.
+# 4. Determines the distribution profile to use.
+# 5. Controls the main bootstrap execution flow.
+
+# Load application logging utilities.
+# shellcheck source=./logging.sh
+source "$LWBS_ROOT/lib/logging.sh"
 
 # Load system detection utilities.
 # shellcheck source=./detect.sh
@@ -30,12 +35,31 @@ bootstrap_main() {
     # Start each interactive bootstrap session with a clean terminal.
     clear_screen
 
+    # Create a dedicated log file for this bootstrap session.
+    init_logging
+
+    log_info "Linux Workstation Bootstrap $LWBS_VERSION started."
+
+    # Detect the host operating system before selecting a bootstrap profile.
     detect_system
+
+    log_info \
+        "Detected system: distro=$SYSTEM_DISTRO_ID version=$SYSTEM_DISTRO_VERSION codename=$SYSTEM_DISTRO_CODENAME architecture=$SYSTEM_ARCH family=$SYSTEM_DISTRO_FAMILY package_manager=$SYSTEM_PACKAGE_MANAGER"
+
     show_system_summary
-    select_distro_profile
+
+    # A cancelled profile selection is a normal exit, not an application error.
+    if ! select_distro_profile; then
+        log_info "Bootstrap cancelled by user."
+        return 0
+    fi
+
+    log_info "Selected distribution profile: $SELECTED_DISTRO_PROFILE"
 
     printf 'Selected profile: %s\n' \
         "$(profile_name "$SELECTED_DISTRO_PROFILE")"
+
+    log_info "Bootstrap foundation completed."
 }
 
 # Determine which supported distribution profile should be used.
