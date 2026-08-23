@@ -20,7 +20,7 @@ init_logging() {
     local state_root
     local timestamp
 
-    # Prefer the XDG state directory when it has been configured by the user.
+    # Prefer the XDG state directory when configured by the user.
     if [[ -n "${XDG_STATE_HOME:-}" ]]; then
         state_root="$XDG_STATE_HOME"
 
@@ -33,22 +33,26 @@ init_logging() {
         return 1
     fi
 
-    LWBS_STATE_DIR="$state_root/linux-workstation-bootstrap"
-    LWBS_LOG_DIR="$LWBS_STATE_DIR/logs"
+    # Build application-specific state and log paths from configuration.
+    LWBS_STATE_DIR="$state_root/$LWBS_APP_SLUG"
+    LWBS_LOG_DIR="$LWBS_STATE_DIR/$LWBS_LOG_DIRECTORY_NAME"
 
-    # Create the log directory if this is the first application run.
+    # Create persistent state directories when they do not already exist.
     mkdir -p -- "$LWBS_LOG_DIR"
 
-    # Restrict access because future logs may contain system information.
-    chmod 700 -- "$LWBS_STATE_DIR" "$LWBS_LOG_DIR"
+    # Restrict access because logs may contain system information.
+    chmod "$LWBS_STATE_DIR_MODE" -- "$LWBS_STATE_DIR"
+    chmod "$LWBS_LOG_DIR_MODE" -- "$LWBS_LOG_DIR"
 
-    # Include the process ID to prevent collisions between simultaneous runs.
+    # Generate a unique timestamp for the current bootstrap session.
     printf -v timestamp '%(%Y%m%d-%H%M%S)T' -1
-    LWBS_LOG_FILE="$LWBS_LOG_DIR/run-${timestamp}-$$.log"
 
-    # Create the session log with user-only read/write permissions.
+    # Include the process ID to avoid collisions between simultaneous runs.
+    LWBS_LOG_FILE="$LWBS_LOG_DIR/${LWBS_LOG_FILE_PREFIX}-${timestamp}-$$.log"
+
+    # Create the session log and restrict access to the current user.
     touch -- "$LWBS_LOG_FILE"
-    chmod 600 -- "$LWBS_LOG_FILE"
+    chmod "$LWBS_LOG_FILE_MODE" -- "$LWBS_LOG_FILE"
 }
 
 # Write a timestamped message to the current session log.
