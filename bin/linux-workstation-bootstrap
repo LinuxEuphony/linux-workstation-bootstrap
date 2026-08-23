@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+
+# Linux Workstation Bootstrap
+# Author: David Kariuki
+#
+# Bootstrap entry point.
+# This file:
+# 1. Establishes safe Bash behaviour.
+# 2. Resolves the project root.
+# 3. Hands control to bootstrap_main().
+#
+
+# Exit immediately on errors, unset variables, or failed commands in pipelines.
+set -Eeuo pipefail
+
+# Resolve the repository root regardless of where the command is executed from.
+# BASH_SOURCE[0] points to this script inside the bin/ directory.
+readonly LWBS_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Load the main bootstrap application logic.
+# shellcheck source=../lib/bootstrap.sh
+source "$LWBS_ROOT/lib/bootstrap.sh"
+
+# Pass all CLI arguments to the application entry point.
+bootstrap_main "$@"
