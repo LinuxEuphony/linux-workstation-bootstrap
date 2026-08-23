@@ -1,0 +1,59 @@
+#
+# JetBrains / IntelliJ IDEA
+#
+*/.idea/workspace.xml
+*/.idea/tasks.xml
+*/.idea/vcs.xml
+*/.idea/shelf/
+*/.idea/httpRequests/
+*/.idea/queries/
+*/.idea/dataSources/
+*/.idea/dataSources.local.xml
+
+#
+# Root-level JetBrains generated files
+#
+/shelf/
+/workspace.xml
+/httpRequests/
+/queries/
+/dataSources/
+/dataSources.local.xml
+
+#
+# Visual Studio Code
+#
+*/.vscode/
+
+#
+# Temporary and backup files
+#
+*~
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+#
+# Logs
+#
+*.log
+
+#
+# OS-generated files
+#
+.DS_Store
+Thumbs.db
+
+#
+# Shell testing / coverage
+#
+/coverage/
+/test-results/
+
+#
+# Local project configuration
+#
+.env
+.env.local
