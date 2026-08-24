@@ -3,22 +3,24 @@
 A reusable, distro-aware Linux workstation bootstrap utility for preparing and configuring Linux workstations in a
 consistent and controlled way.
 
-Linux Workstation Bootstrap detects the host operating system and architecture, identifies the appropriate distribution
-family and package manager, and allows the user to confirm or select the distribution profile before configuration
-begins.
+Linux Workstation Bootstrap detects the host operating system and architecture, identifies the distribution family and
+package manager, and allows the user to confirm or select the distribution profile before configuration begins.
 
 ## Features
 
-* Automatic Linux distribution detection using `/etc/os-release`
+* Linux distribution detection using `/etc/os-release`
 * Distribution version and codename detection
 * Architecture detection and normalization
 * Distribution-family identification
 * Package-manager identification
 * Interactive distribution profile confirmation and selection
-* Persistent per-run logging
-* Clear separation between platform detection, user interaction, core logic, and distribution-specific behavior
+* Command-line distribution profile override
+* Dry-run execution mode
+* Persistent per-session logging
+* Centralized application configuration
+* Separate core, detection, logging, CLI and user-interface layers
 
-Initial distribution profiles include:
+Supported distribution profiles:
 
 * Ubuntu
 * Debian
@@ -27,12 +29,10 @@ Initial distribution profiles include:
 ## Requirements
 
 * Linux
-* Bash
-* A distribution providing `/etc/os-release`
+* Bash 5 or newer
+* `/etc/os-release`
 
-The bootstrap is intended to be run from a terminal.
-
-## Clone
+## Clone and Run
 
 Clone the repository:
 
@@ -52,37 +52,54 @@ Make the bootstrap executable:
 chmod +x bin/linux-workstation-bootstrap
 ```
 
-## Run
-
-Start the bootstrap:
+Run the bootstrap:
 
 ```bash
 ./bin/linux-workstation-bootstrap
 ```
 
-The application detects the current system and presents the detected configuration before proceeding.
+The detected system configuration is displayed before a distribution profile is selected.
 
-Example:
+## Usage
 
 ```text
-Detected system
-
-  Distribution : Ubuntu 26.04 LTS
-  ID           : ubuntu
-  Version      : 26.04
-  Codename     : resolute
-  Architecture : amd64
-  Family       : debian
-  Package mgr  : apt
-
-Use the detected Ubuntu profile? [Y/n]
+./bin/linux-workstation-bootstrap [options]
 ```
 
-If the detected profile is not selected, a supported distribution profile can be chosen manually.
+Available options:
+
+```text
+--distro <profile>   Use a specific distribution profile
+--dry-run            Preview actions without applying system changes
+-y, --yes            Accept a supported detected profile without prompting
+--version            Display the application version
+-h, --help           Display help
+```
+
+Examples:
+
+```bash
+./bin/linux-workstation-bootstrap --help
+```
+
+```bash
+./bin/linux-workstation-bootstrap --version
+```
+
+```bash
+./bin/linux-workstation-bootstrap --dry-run --yes
+```
+
+```bash
+./bin/linux-workstation-bootstrap --distro debian --dry-run
+```
+
+Selecting a different distribution profile does not alter the detected host information. The bootstrap keeps the
+detected system and selected configuration profile separate.
 
 ## Logging
 
-Each execution creates a dedicated session log.
+Each bootstrap execution creates a dedicated session log.
 
 By default, logs are stored under:
 
@@ -90,9 +107,9 @@ By default, logs are stored under:
 ~/.local/state/linux-workstation-bootstrap/logs/
 ```
 
-If `XDG_STATE_HOME` is configured, that location is used instead.
+If `XDG_STATE_HOME` is configured, it is used as the state directory instead.
 
-The bootstrap displays both the current session log and the log directory when it runs.
+The bootstrap displays the current session log and log directory during execution.
 
 ## Project Structure
 
@@ -100,7 +117,10 @@ The bootstrap displays both the current session log and the log directory when i
 linux-workstation-bootstrap/
 ├── bin/
 │   └── linux-workstation-bootstrap
+├── config/
+│   └── defaults.sh
 ├── lib/
+│   ├── arguments.sh
 │   ├── bootstrap.sh
 │   ├── core.sh
 │   ├── detect.sh
@@ -113,17 +133,15 @@ linux-workstation-bootstrap/
 └── docs/
 ```
 
-The command in `bin/` is the application entry point. Shared application behavior lives under `lib/`, while
-distribution-specific behavior, installation modules, and workstation profiles are kept separate as the project grows.
+Application defaults and platform mappings are centralized under `config/`. Shared application behavior is kept under
+`lib/`, while distribution-specific behavior, installation modules and workstation profiles are kept separate.
 
 ## Safety
 
 Linux Workstation Bootstrap is designed to make system changes deliberately and visibly.
 
-Distribution detection, user confirmation, logging, validation, and execution behavior are kept separate so that system
-operations can be validated before changes are applied.
-
-Review the selected configuration and installation actions before allowing system-level changes to proceed.
+Host detection, profile selection, configuration, logging and execution logic are separated so that operations can be
+validated before system changes are applied. Dry-run mode provides a way to preview execution without applying changes.
 
 ## Project
 

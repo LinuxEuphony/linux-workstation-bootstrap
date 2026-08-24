@@ -6,15 +6,20 @@
 # Main application bootstrap.
 # This file:
 # 1. Loads application configuration and components.
-# 2. Initializes application logging.
-# 3. Validates the runtime environment.
-# 4. Coordinates system detection.
-# 5. Determines the distribution profile to use.
-# 6. Controls the main bootstrap execution flow.
+# 2. Processes command-line arguments.
+# 3. Initializes application logging.
+# 4. Validates the runtime environment.
+# 5. Coordinates system detection.
+# 6. Determines the distribution profile to use.
+# 7. Controls the main bootstrap execution flow.
 
 # Load default application configuration.
 # shellcheck source=../config/defaults.sh
 source "$LWBS_ROOT/config/defaults.sh"
+
+# Load command-line argument handling.
+# shellcheck source=./arguments.sh
+source "$LWBS_ROOT/lib/arguments.sh"
 
 # Load application logging utilities.
 # shellcheck source=./logging.sh
@@ -38,8 +43,26 @@ SELECTED_DISTRO_PROFILE=""
 # Main application entry point.
 # All command-line arguments from the executable are passed here.
 bootstrap_main() {
-    # Start each interactive bootstrap session with a clean terminal.
+    # Start every interactive invocation with a clean terminal.
     clear_screen
+
+    # Parse command-line arguments before starting the bootstrap workflow.
+    if ! parse_arguments "$@"; then
+        printf '\nUse --help to view supported options.\n' >&2
+        return 2
+    fi
+
+    # Informational actions do not require logging or system detection.
+    case "$LWBS_CLI_ACTION" in
+        help)
+            show_help
+            return 0
+            ;;
+        version)
+            show_version
+            return 0
+            ;;
+    esac
 
     # Create a dedicated log file before bootstrap processing begins.
     init_logging
@@ -48,6 +71,11 @@ bootstrap_main() {
     show_startup_info
 
     log_info "$LWBS_APP_NAME $LWBS_VERSION started."
+
+    # Record the selected execution mode.
+    if "$LWBS_DRY_RUN"; then
+        log_info "Dry-run mode enabled."
+    fi
 
     # Validate the environment before performing system operations.
     if ! validate_runtime; then
@@ -68,7 +96,7 @@ bootstrap_main() {
 
     show_system_summary
 
-    # A cancelled profile selection is treated as a normal application exit.
+    # Determine which distribution profile should control this session.
     if ! select_distro_profile; then
         log_info "Bootstrap cancelled by user."
         show_cancellation_info
@@ -80,6 +108,22 @@ bootstrap_main() {
     printf 'Selected profile: %s\n' \
         "$(profile_name "$SELECTED_DISTRO_PROFILE")"
 
+    # Make profile overrides explicit when they differ from the detected host.
+    if [[ "$SELECTED_DISTRO_PROFILE" != "$SYSTEM_DISTRO_ID" ]]; then
+        printf 'Profile override: detected %s, selected %s\n' \
+            "$SYSTEM_DISTRO_ID" \
+            "$SELECTED_DISTRO_PROFILE"
+
+        log_warning \
+            "Distribution profile override: detected=$SYSTEM_DISTRO_ID selected=$SELECTED_DISTRO_PROFILE"
+    fi
+
+    # Dry-run currently affects no system operations because installation
+    # modules have not yet been introduced.
+    if "$LWBS_DRY_RUN"; then
+        printf '\nDry-run mode enabled. No system changes will be applied.\n'
+    fi
+
     log_info "Bootstrap foundation completed."
 
     # Show completion information and the session log location.
@@ -88,6 +132,40 @@ bootstrap_main() {
 
 # Determine which supported distribution profile should be used.
 select_distro_profile() {
+    # A profile explicitly supplied on the command line takes precedence.
+    if [[ -n "$LWBS_REQUESTED_DISTRO_PROFILE" ]]; then
+        if ! is_supported_distro "$LWBS_REQUESTED_DISTRO_PROFILE"; then
+            printf 'Error: unsupported distribution profile: %s\n' \
+                "$LWBS_REQUESTED_DISTRO_PROFILE" >&2
+
+            log_error \
+                "Unsupported distribution profile requested: $LWBS_REQUESTED_DISTRO_PROFILE"
+
+            return 1
+        fi
+
+        SELECTED_DISTRO_PROFILE="$LWBS_REQUESTED_DISTRO_PROFILE"
+        return 0
+    fi
+
+    # Automatically accept a supported detected profile when --yes is used.
+    if "$LWBS_ASSUME_YES"; then
+        if is_supported_distro "$SYSTEM_DISTRO_ID"; then
+            SELECTED_DISTRO_PROFILE="$SYSTEM_DISTRO_ID"
+            return 0
+        fi
+
+        printf 'Error: detected distribution "%s" is not currently supported.\n' \
+            "$SYSTEM_DISTRO_ID" >&2
+
+        printf 'Specify a supported profile using --distro.\n' >&2
+
+        log_error \
+            "Automatic profile selection failed for unsupported distro: $SYSTEM_DISTRO_ID"
+
+        return 1
+    fi
+
     # Use the detected distribution when it is supported and confirmed.
     if is_supported_distro "$SYSTEM_DISTRO_ID" &&
         confirm_detected_profile; then
@@ -95,7 +173,7 @@ select_distro_profile() {
         return 0
     fi
 
-    # Fall back to manual profile selection.
+    # Fall back to interactive profile selection.
     if ! choose_distro_profile; then
         return 1
     fi

@@ -10,6 +10,7 @@
 # 3. Displays detected system information.
 # 4. Handles confirmation prompts.
 # 5. Allows the user to select a distribution profile.
+# 6. Displays command-line help and version information.
 
 # Clear the terminal when running interactively.
 # Non-interactive output, such as CI logs, is left untouched.
@@ -115,7 +116,7 @@ choose_distro_profile() {
     while true; do
         printf '\nSelect a distribution profile:\n\n'
 
-        # Build the menu directly from the configured supported profiles.
+        # Build the menu from the configured supported distribution profiles.
         index=1
 
         for distro in "${LWBS_SUPPORTED_DISTROS[@]}"; do
@@ -137,7 +138,7 @@ choose_distro_profile() {
                 ;;
         esac
 
-        # Allow either the menu number or the distribution ID.
+        # Allow selection using the displayed menu number.
         if [[ "$choice" =~ ^[0-9]+$ ]]; then
             selected_index=$((10#$choice - 1))
 
@@ -147,6 +148,7 @@ choose_distro_profile() {
                 return 0
             fi
 
+        # Also allow the distribution ID to be entered directly.
         elif is_supported_distro "${choice,,}"; then
             SELECTED_DISTRO_PROFILE="${choice,,}"
             return 0
@@ -154,4 +156,30 @@ choose_distro_profile() {
 
         printf 'Invalid selection. Please try again.\n'
     done
+}
+
+# Display command-line usage and supported options.
+show_help() {
+    cat <<EOF
+$LWBS_APP_NAME
+
+Usage:
+  ./bin/linux-workstation-bootstrap [options]
+
+Options:
+  --distro <profile>   Use a specific distribution profile
+  --dry-run            Preview actions without applying system changes
+  -y, --yes            Accept a supported detected profile without prompting
+  --version            Display the application version
+  -h, --help           Display this help
+
+Supported profiles:
+$(printf '  %s\n' "${LWBS_SUPPORTED_DISTROS[@]}")
+
+EOF
+}
+
+# Display the current application version.
+show_version() {
+    printf '%s %s\n' "$LWBS_APP_NAME" "$LWBS_VERSION"
 }
