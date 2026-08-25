@@ -29,6 +29,10 @@ source "$LWBS_ROOT/lib/logging.sh"
 # shellcheck source=./core.sh
 source "$LWBS_ROOT/lib/core.sh"
 
+# Load command execution utilities.
+# shellcheck source=./execution.sh
+source "$LWBS_ROOT/lib/execution.sh"
+
 # Load system detection utilities.
 # shellcheck source=./detect.sh
 source "$LWBS_ROOT/lib/detect.sh"
