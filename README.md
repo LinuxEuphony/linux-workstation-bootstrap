@@ -1,148 +1,122 @@
+#!/usr/bin/env bash
+
 # Linux Workstation Bootstrap
+# Author: David Kariuki
+#
+# Distribution adapter utilities.
+# Provides one controlled place to load the selected distro implementation
+# and verify that it satisfies the adapter contract.
+#
+# This file:
+# 1. Loads the adapter for the selected distribution profile.
+# 2. Validates the distribution adapter interface.
+# 3. Tracks the adapter loaded for the current bootstrap session.
+# 4. Prevents unsupported or incomplete adapters from being used.
 
-A reusable, distro-aware Linux workstation bootstrap utility for preparing and configuring Linux workstations in a
-consistent and controlled way.
+# Distribution adapter loaded for the current bootstrap session.
+DISTRO_ADAPTER_PROFILE=""
+DISTRO_ADAPTER_PATH=""
 
-Linux Workstation Bootstrap detects the host operating system and architecture, identifies the distribution family and
-package manager, and allows the user to confirm or select the distribution profile before configuration begins.
+# Load the adapter associated with a supported distribution profile.
+load_distro_adapter() {
+local profile="${1:-}"
+local adapter_path
 
-## Features
+    # A distribution profile must be selected before an adapter can be loaded.
+    if [[ -z "$profile" ]]; then
+        printf 'Error: no distribution profile was provided.\n' >&2
+        log_error "Distribution adapter load requested without a profile."
+        return 2
+    fi
 
-* Linux distribution detection using `/etc/os-release`
-* Distribution version and codename detection
-* Architecture detection and normalization
-* Distribution-family identification
-* Package-manager identification
-* Interactive distribution profile confirmation and selection
-* Command-line distribution profile override
-* Dry-run execution mode
-* Persistent per-session logging
-* Centralized application configuration
-* Separate core, detection, logging, CLI and user-interface layers
+    # Only configured supported profiles may load distribution adapters.
+    if ! is_supported_distro "$profile"; then
+        printf 'Error: unsupported distribution profile: %s\n' \
+            "$profile" >&2
 
-Supported distribution profiles:
+        log_error \
+            "Distribution adapter requested for unsupported profile: $profile"
 
-* Ubuntu
-* Debian
-* Kali Linux
+        return 1
+    fi
 
-## Requirements
+    adapter_path="$LWBS_ROOT/distros/$profile.sh"
 
-* Linux
-* Bash 5 or newer
-* `/etc/os-release`
+    # A supported profile must have a corresponding readable adapter.
+    if [[ ! -r "$adapter_path" ]]; then
+        printf 'Error: distribution adapter not found: %s\n' \
+            "$adapter_path" >&2
 
-## Clone and Run
+        log_error \
+            "Distribution adapter file not found: profile=$profile path=$adapter_path"
 
-Clone the repository:
+        return 1
+    fi
 
-```bash
-git clone https://github.com/LinuxEuphony/linux-workstation-bootstrap.git
-```
+    # Remove any previously loaded contract functions before sourcing another
+    # adapter so validation cannot succeed using stale functions.
+    reset_distro_adapter_contract
 
-Enter the project directory:
+    log_info "Loading distribution adapter: $profile"
 
-```bash
-cd linux-workstation-bootstrap
-```
+    # shellcheck disable=SC1090
+    if ! source "$adapter_path"; then
+        printf 'Error: failed to load distribution adapter: %s\n' \
+            "$profile" >&2
 
-Make the bootstrap executable:
+        log_error \
+            "Distribution adapter source failed: profile=$profile path=$adapter_path"
 
-```bash
-chmod +x bin/linux-workstation-bootstrap
-```
+        reset_distro_adapter_contract
+        return 1
+    fi
 
-Run the bootstrap:
+    # Reject adapters that do not implement the required interface.
+    if ! validate_distro_adapter; then
+        log_error \
+            "Distribution adapter validation failed: profile=$profile"
 
-```bash
-./bin/linux-workstation-bootstrap
-```
+        reset_distro_adapter_contract
+        return 1
+    fi
 
-The detected system configuration is displayed before a distribution profile is selected.
+    DISTRO_ADAPTER_PROFILE="$profile"
+    DISTRO_ADAPTER_PATH="$adapter_path"
 
-## Usage
+    log_info "Distribution adapter loaded: $profile"
 
-```text
-./bin/linux-workstation-bootstrap [options]
-```
+    return 0
+}
 
-Available options:
+# Validate the interface required from every distribution adapter.
+validate_distro_adapter() {
+local required_function
+local -a required_functions=(
+"distro_validate_environment"
+"distro_update_package_index"
+"distro_install_packages"
+)
 
-```text
---distro <profile>   Use a specific distribution profile
---dry-run            Preview actions without applying system changes
--y, --yes            Accept a supported detected profile without prompting
---version            Display the application version
--h, --help           Display help
-```
+    for required_function in "${required_functions[@]}"; do
+        if ! declare -F "$required_function" >/dev/null 2>&1; then
+            printf 'Error: distribution adapter is missing required function: %s\n' \
+                "$required_function" >&2
 
-Examples:
+            return 1
+        fi
+    done
 
-```bash
-./bin/linux-workstation-bootstrap --help
-```
+    return 0
+}
 
-```bash
-./bin/linux-workstation-bootstrap --version
-```
+# Remove functions belonging to the distribution adapter contract.
+reset_distro_adapter_contract() {
+unset -f \
+distro_validate_environment \
+distro_update_package_index \
+distro_install_packages \
+2>/dev/null || true
 
-```bash
-./bin/linux-workstation-bootstrap --dry-run --yes
-```
-
-```bash
-./bin/linux-workstation-bootstrap --distro debian --dry-run
-```
-
-Selecting a different distribution profile does not alter the detected host information. The bootstrap keeps the
-detected system and selected configuration profile separate.
-
-## Logging
-
-Each bootstrap execution creates a dedicated session log.
-
-By default, logs are stored under:
-
-```text
-~/.local/state/linux-workstation-bootstrap/logs/
-```
-
-If `XDG_STATE_HOME` is configured, it is used as the state directory instead.
-
-The bootstrap displays the current session log and log directory during execution.
-
-## Project Structure
-
-```text
-linux-workstation-bootstrap/
-├── bin/
-│   └── linux-workstation-bootstrap
-├── config/
-│   └── defaults.sh
-├── lib/
-│   ├── arguments.sh
-│   ├── bootstrap.sh
-│   ├── core.sh
-│   ├── detect.sh
-│   ├── logging.sh
-│   └── ui.sh
-├── distros/
-├── modules/
-├── profiles/
-├── tests/
-└── docs/
-```
-
-Application defaults and platform mappings are centralized under `config/`. Shared application behavior is kept under
-`lib/`, while distribution-specific behavior, installation modules and workstation profiles are kept separate.
-
-## Safety
-
-Linux Workstation Bootstrap is designed to make system changes deliberately and visibly.
-
-Host detection, profile selection, configuration, logging and execution logic are separated so that operations can be
-validated before system changes are applied. Dry-run mode provides a way to preview execution without applying changes.
-
-## Project
-
-Developed under the [LinuxEuphony](https://github.com/LinuxEuphony) organization.
+    DISTRO_ADAPTER_PROFILE=""
+    DISTRO_ADAPTER_PATH=""
+}

@@ -71,6 +71,17 @@ run_privileged_command() {
 
     command_name="$1"
 
+    # Dry-run does not require sudo because no privileged command is executed.
+    if "$LWBS_DRY_RUN"; then
+        printf '[DRY-RUN] Would execute with root privileges: %s\n' \
+            "$command_name"
+
+        log_info \
+            "Dry-run skipped privileged command: $command_name"
+
+        return 0
+    fi
+
     # Commands can be executed directly when the bootstrap already has
     # effective root privileges.
     if ((EUID == 0)); then
@@ -93,16 +104,6 @@ run_privileged_command() {
 
     # Keep privilege escalation centralized rather than implementing sudo
     # handling separately inside each distribution adapter.
-    if "$LWBS_DRY_RUN"; then
-        printf '[DRY-RUN] Would execute with root privileges: %s\n' \
-            "$command_name"
-
-        log_info \
-            "Dry-run skipped privileged command: $command_name"
-
-        return 0
-    fi
-
     log_info "Executing privileged command: $command_name"
 
     # sudo executes the requested command while run_command retains the
