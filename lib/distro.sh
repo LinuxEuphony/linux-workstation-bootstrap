@@ -19,7 +19,7 @@ DISTRO_ADAPTER_PATH=""
 
 # Load the adapter associated with a supported distribution profile.
 load_distro_adapter() {
-    local profile="$1"
+    local profile="${1:-}"
     local adapter_path
 
     # A distribution profile must be selected before an adapter can be loaded.
@@ -53,16 +53,30 @@ load_distro_adapter() {
         return 1
     fi
 
+    # Remove any previously loaded contract functions before sourcing another
+    # adapter so validation cannot succeed using stale functions.
+    reset_distro_adapter_contract
+
     log_info "Loading distribution adapter: $profile"
 
     # shellcheck disable=SC1090
-    source "$adapter_path"
+    if ! source "$adapter_path"; then
+        printf 'Error: failed to load distribution adapter: %s\n' \
+            "$profile" >&2
+
+        log_error \
+            "Distribution adapter source failed: profile=$profile path=$adapter_path"
+
+        reset_distro_adapter_contract
+        return 1
+    fi
 
     # Reject adapters that do not implement the required interface.
     if ! validate_distro_adapter; then
         log_error \
             "Distribution adapter validation failed: profile=$profile"
 
+        reset_distro_adapter_contract
         return 1
     fi
 
@@ -93,4 +107,16 @@ validate_distro_adapter() {
     done
 
     return 0
+}
+
+# Remove functions belonging to the distribution adapter contract.
+reset_distro_adapter_contract() {
+    unset -f \
+        distro_validate_environment \
+        distro_update_package_index \
+        distro_install_packages \
+        2>/dev/null || true
+
+    DISTRO_ADAPTER_PROFILE=""
+    DISTRO_ADAPTER_PATH=""
 }
