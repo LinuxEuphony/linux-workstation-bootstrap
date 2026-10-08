@@ -14,7 +14,7 @@
 # 4. Validates the runtime environment.
 # 5. Coordinates system detection.
 # 6. Determines the distribution profile to use.
-# 7. Exposes the distribution adapter framework to the bootstrap lifecycle.
+# 7. Loads and validates the selected distribution adapter.
 # 8. Controls the main bootstrap execution flow.
 
 # Load default application configuration.
@@ -38,7 +38,6 @@ source "$LWBS_ROOT/lib/core.sh"
 source "$LWBS_ROOT/lib/execution.sh"
 
 # Load distribution adapter utilities.
-# Concrete adapters are introduced separately under distros/.
 # shellcheck source=./distro.sh
 source "$LWBS_ROOT/lib/distro.sh"
 
@@ -131,8 +130,29 @@ bootstrap_main() {
             "Distribution profile override: detected=$SYSTEM_DISTRO_ID selected=$SELECTED_DISTRO_PROFILE"
     fi
 
-    # Concrete distribution adapters and installation modules are introduced
-    # by later implementation issues. Until then, no package operations run.
+    # Load the implementation associated with the selected distro profile.
+    if ! load_distro_adapter "$SELECTED_DISTRO_PROFILE"; then
+        log_error \
+            "Unable to load distribution adapter: $SELECTED_DISTRO_PROFILE"
+
+        show_failure_info
+        return 1
+    fi
+
+    # Verify that the selected adapter can operate on the detected system.
+    if ! distro_validate_environment; then
+        log_error \
+            "Distribution adapter environment validation failed: $SELECTED_DISTRO_PROFILE"
+
+        show_failure_info
+        return 1
+    fi
+
+    log_info \
+        "Distribution adapter ready: $DISTRO_ADAPTER_PROFILE"
+
+    # Installation modules are introduced separately. Loading an adapter does
+    # not itself refresh repositories or install packages.
     if "$LWBS_DRY_RUN"; then
         printf '\nDry-run mode enabled. No system changes will be applied.\n'
     fi
