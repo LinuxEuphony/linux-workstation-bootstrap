@@ -23,10 +23,11 @@ The current bootstrap foundation provides:
 * Distribution adapter loading and contract validation
 * Ubuntu package-management adapter
 * Debian package-management adapter
+* Kali Linux package-management adapter
 * Package index refresh support through distribution adapters
 * Package installation support through distribution adapters
 
-Configured distribution profiles:
+Supported distribution profiles:
 
 * Ubuntu
 * Debian
@@ -38,7 +39,7 @@ Current adapter implementation status:
 | --- | --- |
 | Ubuntu | Implemented |
 | Debian | Implemented |
-| Kali Linux | Pending |
+| Kali Linux | Implemented |
 
 ## Architecture
 
@@ -159,11 +160,12 @@ Current concrete implementations are:
 ```text
 distros/ubuntu.sh
 distros/debian.sh
+distros/kali.sh
 ```
 
-Both Ubuntu and Debian use APT at the current adapter level, but remain separate implementations so distro-specific behavior can evolve independently.
+Ubuntu, Debian, and Kali Linux all use APT at the current adapter level, but remain separate implementations so distro-specific behavior can evolve independently.
 
-The adapters:
+The adapters currently:
 
 * validate that the detected system belongs to the Debian package-management family
 * validate that APT is the expected package manager
@@ -174,13 +176,41 @@ The adapters:
 
 Shared application code does not execute `apt-get` directly.
 
+## Modules and Profiles
+
+Distribution support answers how operations are performed on the host. Modules and profiles provide the next architectural layer.
+
+A module represents an installable workstation capability, for example:
+
+```text
+common utilities
+development tools
+containers
+database tooling
+desktop and media applications
+security tooling
+hardware and power management
+```
+
+Modules should describe what a capability requires without embedding distro-specific package-manager commands.
+
+Profiles compose modules into complete workstation configurations, for example:
+
+```text
+default workstation
+developer workstation
+security workstation
+```
+
+This allows the same module intent to be reused across multiple workstation profiles and distribution adapters.
+
 ## Requirements
 
 * Linux
 * Bash 5 or newer
 * `/etc/os-release`
 
-Ubuntu and Debian package operations additionally require:
+Ubuntu, Debian, and Kali Linux package operations additionally require:
 
 * APT
 * `apt-get`
@@ -251,9 +281,11 @@ Examples:
 ./bin/linux-workstation-bootstrap --distro debian --dry-run
 ```
 
-Selecting a different distribution profile does not alter the detected host information. The bootstrap keeps the detected system and selected configuration profile separate.
+```bash
+./bin/linux-workstation-bootstrap --distro kali --dry-run
+```
 
-A configured profile whose concrete adapter has not yet been implemented will fail safely when the bootstrap attempts to load that adapter.
+Selecting a different distribution profile does not alter the detected host information. The bootstrap keeps the detected system and selected configuration profile separate.
 
 ## Logging
 
@@ -288,6 +320,7 @@ linux-workstation-bootstrap/
 │   └── ui.sh
 ├── distros/
 │   ├── debian.sh
+│   ├── kali.sh
 │   └── ubuntu.sh
 ├── modules/
 ├── profiles/
