@@ -22,8 +22,9 @@ The current bootstrap foundation provides:
 * Centralized privileged command execution
 * Distribution adapter loading and contract validation
 * Ubuntu package-management adapter
-* Ubuntu package index refresh support
-* Ubuntu package installation support
+* Debian package-management adapter
+* Package index refresh support through distribution adapters
+* Package installation support through distribution adapters
 
 Configured distribution profiles:
 
@@ -36,7 +37,7 @@ Current adapter implementation status:
 | Profile | Adapter |
 | --- | --- |
 | Ubuntu | Implemented |
-| Debian | Pending |
+| Debian | Implemented |
 | Kali Linux | Pending |
 
 ## Architecture
@@ -153,20 +154,23 @@ distro_update_package_index
 distro_install_packages
 ```
 
-The first concrete implementation is:
+Current concrete implementations are:
 
 ```text
 distros/ubuntu.sh
+distros/debian.sh
 ```
 
-The Ubuntu adapter:
+Both Ubuntu and Debian use APT at the current adapter level, but remain separate implementations so distro-specific behavior can evolve independently.
 
-* validates that the detected system belongs to the Debian package-management family
-* validates that APT is the expected package manager
-* verifies that `apt-get` is available
-* refreshes package indexes through the shared privileged execution layer
-* installs one or more packages through the shared privileged execution layer
-* inherits dry-run behavior from the shared execution utilities
+The adapters:
+
+* validate that the detected system belongs to the Debian package-management family
+* validate that APT is the expected package manager
+* verify that `apt-get` is available
+* refresh package indexes through the shared privileged execution layer
+* install one or more packages through the shared privileged execution layer
+* inherit dry-run behavior from the shared execution utilities
 
 Shared application code does not execute `apt-get` directly.
 
@@ -176,7 +180,7 @@ Shared application code does not execute `apt-get` directly.
 * Bash 5 or newer
 * `/etc/os-release`
 
-Ubuntu package operations additionally require:
+Ubuntu and Debian package operations additionally require:
 
 * APT
 * `apt-get`
@@ -243,6 +247,10 @@ Examples:
 ./bin/linux-workstation-bootstrap --distro ubuntu --dry-run
 ```
 
+```bash
+./bin/linux-workstation-bootstrap --distro debian --dry-run
+```
+
 Selecting a different distribution profile does not alter the detected host information. The bootstrap keeps the detected system and selected configuration profile separate.
 
 A configured profile whose concrete adapter has not yet been implemented will fail safely when the bootstrap attempts to load that adapter.
@@ -279,6 +287,7 @@ linux-workstation-bootstrap/
 │   ├── logging.sh
 │   └── ui.sh
 ├── distros/
+│   ├── debian.sh
 │   └── ubuntu.sh
 ├── modules/
 ├── profiles/
