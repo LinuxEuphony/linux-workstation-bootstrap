@@ -3,120 +3,193 @@
 # Linux Workstation Bootstrap
 # Author: David Kariuki
 #
-# Distribution adapter utilities.
-# Provides one controlled place to load the selected distro implementation
-# and verify that it satisfies the adapter contract.
+# Main application bootstrap.
+# Coordinates the shared bootstrap layers without embedding distribution-
+# specific installation logic in the application entry flow.
 #
 # This file:
-# 1. Loads the adapter for the selected distribution profile.
-# 2. Validates the distribution adapter interface.
-# 3. Tracks the adapter loaded for the current bootstrap session.
-# 4. Prevents unsupported or incomplete adapters from being used.
+# 1. Loads application configuration and shared components.
+# 2. Processes command-line arguments.
+# 3. Initializes application logging.
+# 4. Validates the runtime environment.
+# 5. Coordinates system detection.
+# 6. Determines the distribution profile to use.
+# 7. Exposes the distribution adapter framework to the bootstrap lifecycle.
+# 8. Controls the main bootstrap execution flow.
 
-# Distribution adapter loaded for the current bootstrap session.
-DISTRO_ADAPTER_PROFILE=""
-DISTRO_ADAPTER_PATH=""
+# Load default application configuration.
+# shellcheck source=../config/defaults.sh
+source "$LWBS_ROOT/config/defaults.sh"
 
-# Load the adapter associated with a supported distribution profile.
-load_distro_adapter() {
-    local profile="${1:-}"
-    local adapter_path
+# Load command-line argument handling.
+# shellcheck source=./arguments.sh
+source "$LWBS_ROOT/lib/arguments.sh"
 
-    # A distribution profile must be selected before an adapter can be loaded.
-    if [[ -z "$profile" ]]; then
-        printf 'Error: no distribution profile was provided.\n' >&2
-        log_error "Distribution adapter load requested without a profile."
+# Load application logging utilities.
+# shellcheck source=./logging.sh
+source "$LWBS_ROOT/lib/logging.sh"
+
+# Load core application utilities.
+# shellcheck source=./core.sh
+source "$LWBS_ROOT/lib/core.sh"
+
+# Load command execution utilities.
+# shellcheck source=./execution.sh
+source "$LWBS_ROOT/lib/execution.sh"
+
+# Load distribution adapter utilities.
+# Concrete adapters are introduced separately under distros/.
+# shellcheck source=./distro.sh
+source "$LWBS_ROOT/lib/distro.sh"
+
+# Load system detection utilities.
+# shellcheck source=./detect.sh
+source "$LWBS_ROOT/lib/detect.sh"
+
+# Load terminal user interface utilities.
+# shellcheck source=./ui.sh
+source "$LWBS_ROOT/lib/ui.sh"
+
+# Distribution profile selected for the current bootstrap session.
+SELECTED_DISTRO_PROFILE=""
+
+# Main application entry point.
+# All command-line arguments from the executable are passed here.
+bootstrap_main() {
+    # Start every interactive invocation with a clean terminal.
+    clear_screen
+
+    # Parse command-line arguments before starting the bootstrap workflow.
+    if ! parse_arguments "$@"; then
+        printf '\nUse --help to view supported options.\n' >&2
         return 2
     fi
 
-    # Only configured supported profiles may load distribution adapters.
-    if ! is_supported_distro "$profile"; then
-        printf 'Error: unsupported distribution profile: %s\n' \
-            "$profile" >&2
+    # Informational actions do not require logging or system detection.
+    case "$LWBS_CLI_ACTION" in
+        help)
+            show_help
+            return 0
+            ;;
+        version)
+            show_version
+            return 0
+            ;;
+    esac
 
-        log_error \
-            "Distribution adapter requested for unsupported profile: $profile"
+    # Create a dedicated log file before bootstrap processing begins.
+    init_logging
 
+    # Show application and logging information immediately.
+    show_startup_info
+
+    log_info "$LWBS_APP_NAME $LWBS_VERSION started."
+
+    # Record the selected execution mode.
+    if "$LWBS_DRY_RUN"; then
+        log_info "Dry-run mode enabled."
+    fi
+
+    # Validate the environment before performing system operations.
+    if ! validate_runtime; then
+        log_error "Runtime validation failed."
+        show_failure_info
         return 1
     fi
 
-    adapter_path="$LWBS_ROOT/distros/$profile.sh"
-
-    # A supported profile must have a corresponding readable adapter.
-    if [[ ! -r "$adapter_path" ]]; then
-        printf 'Error: distribution adapter not found: %s\n' \
-            "$adapter_path" >&2
-
-        log_error \
-            "Distribution adapter file not found: profile=$profile path=$adapter_path"
-
+    # Detect the host operating system and architecture.
+    if ! detect_system; then
+        log_error "System detection failed."
+        show_failure_info
         return 1
     fi
 
-    # Remove any previously loaded contract functions before sourcing another
-    # adapter so validation cannot succeed using stale functions.
-    reset_distro_adapter_contract
+    log_info \
+        "Detected system: distro=$SYSTEM_DISTRO_ID version=$SYSTEM_DISTRO_VERSION codename=$SYSTEM_DISTRO_CODENAME architecture=$SYSTEM_ARCH family=$SYSTEM_DISTRO_FAMILY package_manager=$SYSTEM_PACKAGE_MANAGER"
 
-    log_info "Loading distribution adapter: $profile"
+    show_system_summary
 
-    # shellcheck disable=SC1090
-    if ! source "$adapter_path"; then
-        printf 'Error: failed to load distribution adapter: %s\n' \
-            "$profile" >&2
-
-        log_error \
-            "Distribution adapter source failed: profile=$profile path=$adapter_path"
-
-        reset_distro_adapter_contract
-        return 1
+    # Determine which distribution profile should control this session.
+    if ! select_distro_profile; then
+        log_info "Bootstrap cancelled by user."
+        show_cancellation_info
+        return 0
     fi
 
-    # Reject adapters that do not implement the required interface.
-    if ! validate_distro_adapter; then
-        log_error \
-            "Distribution adapter validation failed: profile=$profile"
+    log_info "Selected distribution profile: $SELECTED_DISTRO_PROFILE"
 
-        reset_distro_adapter_contract
-        return 1
+    printf 'Selected profile: %s\n' \
+        "$(profile_name "$SELECTED_DISTRO_PROFILE")"
+
+    # Make profile overrides explicit when they differ from the detected host.
+    if [[ "$SELECTED_DISTRO_PROFILE" != "$SYSTEM_DISTRO_ID" ]]; then
+        printf 'Profile override: detected %s, selected %s\n' \
+            "$SYSTEM_DISTRO_ID" \
+            "$SELECTED_DISTRO_PROFILE"
+
+        log_warning \
+            "Distribution profile override: detected=$SYSTEM_DISTRO_ID selected=$SELECTED_DISTRO_PROFILE"
     fi
 
-    DISTRO_ADAPTER_PROFILE="$profile"
-    DISTRO_ADAPTER_PATH="$adapter_path"
+    # Concrete distribution adapters and installation modules are introduced
+    # by later implementation issues. Until then, no package operations run.
+    if "$LWBS_DRY_RUN"; then
+        printf '\nDry-run mode enabled. No system changes will be applied.\n'
+    fi
 
-    log_info "Distribution adapter loaded: $profile"
+    log_info "Bootstrap foundation completed."
 
-    return 0
+    # Show completion information and the session log location.
+    show_completion_info
 }
 
-# Validate the interface required from every distribution adapter.
-validate_distro_adapter() {
-    local required_function
-    local -a required_functions=(
-        "distro_validate_environment"
-        "distro_update_package_index"
-        "distro_install_packages"
-    )
+# Determine which supported distribution profile should be used.
+select_distro_profile() {
+    # A profile explicitly supplied on the command line takes precedence.
+    if [[ -n "$LWBS_REQUESTED_DISTRO_PROFILE" ]]; then
+        if ! is_supported_distro "$LWBS_REQUESTED_DISTRO_PROFILE"; then
+            printf 'Error: unsupported distribution profile: %s\n' \
+                "$LWBS_REQUESTED_DISTRO_PROFILE" >&2
 
-    for required_function in "${required_functions[@]}"; do
-        if ! declare -F "$required_function" >/dev/null 2>&1; then
-            printf 'Error: distribution adapter is missing required function: %s\n' \
-                "$required_function" >&2
+            log_error \
+                "Unsupported distribution profile requested: $LWBS_REQUESTED_DISTRO_PROFILE"
 
             return 1
         fi
-    done
+
+        SELECTED_DISTRO_PROFILE="$LWBS_REQUESTED_DISTRO_PROFILE"
+        return 0
+    fi
+
+    # Automatically accept a supported detected profile when --yes is used.
+    if "$LWBS_ASSUME_YES"; then
+        if is_supported_distro "$SYSTEM_DISTRO_ID"; then
+            SELECTED_DISTRO_PROFILE="$SYSTEM_DISTRO_ID"
+            return 0
+        fi
+
+        printf 'Error: detected distribution "%s" is not currently supported.\n' \
+            "$SYSTEM_DISTRO_ID" >&2
+
+        printf 'Specify a supported profile using --distro.\n' >&2
+
+        log_error \
+            "Automatic profile selection failed for unsupported distro: $SYSTEM_DISTRO_ID"
+
+        return 1
+    fi
+
+    # Use the detected distribution when it is supported and confirmed.
+    if is_supported_distro "$SYSTEM_DISTRO_ID" &&
+        confirm_detected_profile; then
+        SELECTED_DISTRO_PROFILE="$SYSTEM_DISTRO_ID"
+        return 0
+    fi
+
+    # Fall back to interactive profile selection.
+    if ! choose_distro_profile; then
+        return 1
+    fi
 
     return 0
-}
-
-# Remove functions belonging to the distribution adapter contract.
-reset_distro_adapter_contract() {
-    unset -f \
-        distro_validate_environment \
-        distro_update_package_index \
-        distro_install_packages \
-        2>/dev/null || true
-
-    DISTRO_ADAPTER_PROFILE=""
-    DISTRO_ADAPTER_PATH=""
 }
