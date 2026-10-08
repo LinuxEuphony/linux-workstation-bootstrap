@@ -15,7 +15,8 @@
 # 5. Coordinates system detection.
 # 6. Determines the distribution profile to use.
 # 7. Loads and validates the selected distribution adapter.
-# 8. Controls the main bootstrap execution flow.
+# 8. Exposes the workstation module framework.
+# 9. Controls the main bootstrap execution flow.
 
 # Load default application configuration.
 # shellcheck source=../config/defaults.sh
@@ -40,6 +41,10 @@ source "$LWBS_ROOT/lib/execution.sh"
 # Load distribution adapter utilities.
 # shellcheck source=./distro.sh
 source "$LWBS_ROOT/lib/distro.sh"
+
+# Load workstation module utilities.
+# shellcheck source=./module.sh
+source "$LWBS_ROOT/lib/module.sh"
 
 # Load system detection utilities.
 # shellcheck source=./detect.sh
@@ -151,8 +156,8 @@ bootstrap_main() {
     log_info \
         "Distribution adapter ready: $DISTRO_ADAPTER_PROFILE"
 
-    # Installation modules are introduced separately. Loading an adapter does
-    # not itself refresh repositories or install packages.
+    # Module selection and profile orchestration are introduced separately.
+    # Loading the module framework does not itself install workstation software.
     if "$LWBS_DRY_RUN"; then
         printf '\nDry-run mode enabled. No system changes will be applied.\n'
     fi

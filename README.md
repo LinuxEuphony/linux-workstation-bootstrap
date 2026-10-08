@@ -26,6 +26,11 @@ The current bootstrap foundation provides:
 * Kali Linux package-management adapter
 * Package index refresh support through distribution adapters
 * Package installation support through distribution adapters
+* Controlled workstation module loading
+* Module contract validation
+* Module package requirement handling
+* Optional module operation hooks
+* Module execution through the selected distribution adapter
 
 Supported distribution profiles:
 
@@ -46,39 +51,41 @@ Current adapter implementation status:
 The project is intentionally split into layers rather than placing detection, package installation, prompts, and system changes in one script.
 
 ```text
-User
-  │
-  ▼
+                         profiles/
+                             │
+                             ▼
+                          modules/
+                             │
+                             ▼
+User                 lib/module.sh
+  │                        │
+  ▼                        │
 bin/linux-workstation-bootstrap
-  │
-  ▼
-lib/bootstrap.sh
-  │
-  ├── config/defaults.sh
-  ├── lib/arguments.sh
-  ├── lib/core.sh
-  ├── lib/detect.sh
-  ├── lib/logging.sh
-  ├── lib/ui.sh
-  ├── lib/execution.sh
-  └── lib/distro.sh
-          │
-          ▼
-     distros/<profile>.sh
-          │
-          ▼
-        modules/
-          │
-          ▼
-        profiles/
+  │                        │
+  └────────────┬───────────┘
+               ▼
+        lib/bootstrap.sh
+               │
+      ┌────────┼───────────────┐
+      │        │               │
+      ▼        ▼               ▼
+  Detection  Execution     lib/distro.sh
+                              │
+                              ▼
+                       distros/<profile>.sh
+                              │
+                              ▼
+                         Package manager
 ```
+
+Shared support around the bootstrap orchestration includes configuration, logging, CLI parsing, runtime validation, and terminal UI.
 
 The main architectural responsibilities are:
 
 * **Entry point**: `bin/linux-workstation-bootstrap` establishes safe Bash behavior, resolves the repository root, and hands control to `bootstrap_main`.
-* **Bootstrap orchestration**: `lib/bootstrap.sh` coordinates the application lifecycle. It decides the order of operations without containing distro-specific package commands.
+* **Bootstrap orchestration**: `lib/bootstrap.sh` coordinates the application lifecycle without containing distro-specific installation commands.
 * **Configuration**: `config/defaults.sh` contains built-in application defaults, supported distro mappings, architecture mappings, and logging defaults.
-* **CLI parsing**: `lib/arguments.sh` interprets command-line options and records the requested runtime behavior.
+* **CLI parsing**: `lib/arguments.sh` interprets command-line options and records requested runtime behavior.
 * **Core utilities**: `lib/core.sh` provides distro-independent runtime checks and reusable helpers.
 * **System detection**: `lib/detect.sh` determines the actual host distribution, distro family, architecture, and expected package manager.
 * **Logging**: `lib/logging.sh` creates and writes the per-run session log.
@@ -86,7 +93,8 @@ The main architectural responsibilities are:
 * **Execution boundary**: `lib/execution.sh` centralizes command execution, privilege escalation, dry-run handling, and command result logging.
 * **Distro adapter framework**: `lib/distro.sh` loads the selected distro adapter and verifies that it implements the required contract.
 * **Distribution adapters**: `distros/` contains operating-system-specific package-management implementations.
-* **Modules**: `modules/` contains reusable workstation capabilities such as development tools, containers, databases, desktop/media tooling, security tooling, and hardware support.
+* **Module framework**: `lib/module.sh` loads, validates, and executes workstation capability modules.
+* **Modules**: `modules/` declares reusable workstation capabilities and their requirements.
 * **Profiles**: `profiles/` selects groups of modules to form complete workstation configurations.
 
 The key separation is:
@@ -98,11 +106,9 @@ Distribution adapters implement how the operating system satisfies them.
 Shared libraries provide the infrastructure used by all of them.
 ```
 
-The detected host and selected distribution profile are intentionally separate. Detection records what the machine actually is, while profile selection determines which supported distro behavior the bootstrap should use.
-
 ## Bootstrap Flow
 
-The bootstrap lifecycle currently begins with:
+The bootstrap lifecycle currently establishes:
 
 ```text
 Parse CLI arguments
@@ -126,22 +132,30 @@ Load distribution adapter
 Validate adapter environment
 ```
 
-As the project evolves, the lifecycle continues into:
+The module framework now provides the next execution layer:
 
 ```text
-Resolve profiles and modules
-       │
-       ▼
-Build execution plan
-       │
-       ▼
-Apply changes
-       │
-       ▼
-Verify and summarize
+Select module
+     │
+     ▼
+Load module
+     │
+     ▼
+Validate module contract
+     │
+     ▼
+Resolve package requirements
+     │
+     ▼
+Selected distro adapter
+     │
+     ▼
+Shared execution layer
 ```
 
-Loading a distribution adapter does not itself update repositories or install packages. Package operations are invoked explicitly by higher-level bootstrap actions and modules.
+Profile selection, module dependency resolution, execution planning, and post-install verification are added by later implementation stages.
+
+Loading a distribution adapter or module framework does not itself update repositories or install packages.
 
 ## Distribution Adapter Contract
 
@@ -165,22 +179,52 @@ distros/kali.sh
 
 Ubuntu, Debian, and Kali Linux all use APT at the current adapter level, but remain separate implementations so distro-specific behavior can evolve independently.
 
-The adapters currently:
+Shared application and module code does not execute `apt-get` directly.
 
-* validate that the detected system belongs to the Debian package-management family
-* validate that APT is the expected package manager
-* verify that `apt-get` is available
-* refresh package indexes through the shared privileged execution layer
-* install one or more packages through the shared privileged execution layer
-* inherit dry-run behavior from the shared execution utilities
+## Module Contract
 
-Shared application code does not execute `apt-get` directly.
+A workstation module represents one reusable capability.
+
+Modules are loaded from:
+
+```text
+modules/<module-id>.sh
+```
+
+Every module must provide:
+
+```text
+module_id
+module_name
+module_description
+module_packages
+```
+
+A module may additionally provide:
+
+```text
+module_apply
+```
+
+`module_packages` emits one package requirement per line.
+
+The module framework validates these declarations before execution and passes package requirements to:
+
+```text
+distro_install_packages
+```
+
+This means a module never needs to know whether the selected distro adapter uses `apt-get` or another package-management implementation.
+
+`module_apply` is reserved for module-specific operations that cannot be represented as package installation. Mutating operations implemented there must use the project's shared execution and configuration facilities so dry-run and safety behavior remain consistent.
+
+Modules must not call package managers directly.
+
+Package capability mapping is introduced separately so shared modules can eventually express portable package intent where distro package names differ.
 
 ## Modules and Profiles
 
-Distribution support answers how operations are performed on the host. Modules and profiles provide the next architectural layer.
-
-A module represents an installable workstation capability, for example:
+Modules represent reusable workstation capabilities such as:
 
 ```text
 common utilities
@@ -192,9 +236,7 @@ security tooling
 hardware and power management
 ```
 
-Modules should describe what a capability requires without embedding distro-specific package-manager commands.
-
-Profiles compose modules into complete workstation configurations, for example:
+Profiles compose modules into complete workstation configurations such as:
 
 ```text
 default workstation
@@ -202,7 +244,7 @@ developer workstation
 security workstation
 ```
 
-This allows the same module intent to be reused across multiple workstation profiles and distribution adapters.
+This allows workstation intent to remain independent from the distribution-specific mechanism used to satisfy it.
 
 ## Requirements
 
@@ -317,6 +359,7 @@ linux-workstation-bootstrap/
 │   ├── distro.sh
 │   ├── execution.sh
 │   ├── logging.sh
+│   ├── module.sh
 │   └── ui.sh
 ├── distros/
 │   ├── debian.sh
@@ -328,19 +371,21 @@ linux-workstation-bootstrap/
 └── docs/
 ```
 
-`modules/`, `profiles/`, `tests/`, and `docs/` are populated as their corresponding implementation work is completed.
+The framework under `lib/` is implemented independently from concrete workstation modules. Modules and profiles are populated as their corresponding implementation work is completed.
 
 ## Safety
 
 Linux Workstation Bootstrap is designed to make system changes deliberately and visibly.
 
-Host detection, profile selection, adapter validation, configuration, logging, and execution logic are separated so operations can be validated before system changes are applied. Dry-run mode provides a way to preview execution without applying changes.
+Host detection, profile selection, adapter validation, module validation, configuration, logging, and execution logic are separated so operations can be validated before system changes are applied. Dry-run mode provides a way to preview execution without applying changes.
 
 Command execution and privilege escalation are centralized so system-changing operations use a consistent execution path. Command arguments are not blindly written to logs because future operations may contain credentials, tokens, sensitive URLs, or other values that should not be persisted.
 
-Distribution-specific operations are isolated behind a validated adapter contract so package-manager behavior does not leak into shared application logic.
+Distribution-specific operations are isolated behind a validated adapter contract so package-manager behavior does not leak into shared application or module logic.
 
-Loading an adapter does not automatically refresh package indexes or install software.
+Modules are validated before execution and delegate package installation to the selected distro adapter.
+
+Loading an adapter or module does not automatically change the workstation.
 
 ## Project
 
