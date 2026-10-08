@@ -1,0 +1,16 @@
+# JetBrains IDEs
+.idea/
+*.iml
+*.ipr
+*.iws
+
+# Editor swap and backup files
+*~
+*.swp
+*.swo
+*.tmp
+*.bak
+
+# OS-generated files
+.DS_Store
+Thumbs.db
