@@ -1,0 +1,5 @@
+ID=examplelinux
+PRETTY_NAME="Example Linux"
+VERSION_ID="1"
+VERSION_CODENAME=example
+ID_LIKE="debian ubuntu"
