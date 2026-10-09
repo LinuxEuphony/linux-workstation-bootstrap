@@ -12,6 +12,7 @@
 # 2. Validates the distribution adapter interface.
 # 3. Tracks the adapter loaded for the current bootstrap session.
 # 4. Prevents unsupported or incomplete adapters from being used.
+# 5. Requires distro-specific package-state detection.
 
 # Distribution adapter loaded for the current bootstrap session.
 DISTRO_ADAPTER_PROFILE=""
@@ -91,6 +92,7 @@ validate_distro_adapter() {
         "distro_update_package_index"
         "distro_install_packages"
         "distro_install_local_package"
+        "distro_package_state"
     )
 
     for required_function in "${required_functions[@]}"; do
@@ -112,6 +114,7 @@ reset_distro_adapter_contract() {
         distro_update_package_index \
         distro_install_packages \
         distro_install_local_package \
+        distro_package_state \
         2>/dev/null || true
 
     DISTRO_ADAPTER_PROFILE=""

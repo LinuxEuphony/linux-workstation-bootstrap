@@ -2,7 +2,7 @@
 
 A reusable, distro-aware Linux workstation bootstrap utility for preparing and configuring Linux workstations in a consistent and controlled way.
 
-Linux Workstation Bootstrap is a modular replacement for a monolithic workstation setup script. It separates host detection, portable software intent, distribution-specific package resolution, external software installation, command execution, installable capabilities, and workstation profiles so each concern can evolve independently.
+Linux Workstation Bootstrap is a modular replacement for a monolithic workstation setup script. It separates host detection, portable software intent, distribution-specific package resolution, external software installation, installation-state detection, command execution, installable capabilities, and workstation profiles so each concern can evolve independently.
 
 ## Current Capabilities
 
@@ -26,7 +26,11 @@ The current bootstrap foundation provides:
 * Kali Linux package-management adapter
 * Portable package capability resolution
 * Independent package mappings per distribution profile
+* Distribution-specific package-state detection
+* Idempotent package installation filtering
 * Controlled external software installer loading and validation
+* External software installed-state detection
+* Idempotent external software execution
 * Repository, local-package, archive, and script installation methods
 * Predictable temporary staging for external artifacts
 * HTTPS-only external artifact downloads
@@ -47,11 +51,11 @@ Supported distribution profiles:
 
 Current distribution adapter status:
 
-| Distribution | Adapter | Package Mapping | Local Packages |
-| --- | --- | --- | --- |
-| Ubuntu | Implemented | Implemented | Implemented |
-| Debian | Implemented | Implemented | Implemented |
-| Kali Linux | Implemented | Implemented | Implemented |
+| Distribution | Adapter | Package Mapping | Package State | Local Packages |
+| --- | --- | --- | --- | --- |
+| Ubuntu | Implemented | Implemented | Implemented | Implemented |
+| Debian | Implemented | Implemented | Implemented | Implemented |
+| Kali Linux | Implemented | Implemented | Implemented | Implemented |
 
 ## Architecture
 
@@ -71,13 +75,20 @@ Capability Resolver
         |
         | distro package mapping
         v
-Distribution Adapter
+ Package State Check
         |
-        v
- Execution Layer
-        |
-        v
-System Package Manager
+   +----+----+
+   |         |
+installed   absent
+   |         |
+   v         v
+  skip   Distribution Adapter
+                 |
+                 v
+          Execution Layer
+                 |
+                 v
+        System Package Manager
 ```
 
 Software that cannot be installed exclusively from the standard distribution repositories follows a separate controlled path:
@@ -89,13 +100,23 @@ Software that cannot be installed exclusively from the standard distribution rep
         v
 External Installer
         |
-        +-- Repository
-        +-- Local Package
-        +-- Archive
-        `-- Installer Script
-                 |
-                 v
-        Shared Execution Layer
+        v
+ External State Check
+        |
+   +----+----+
+   |         |
+installed   absent
+   |         |
+   v         v
+  skip    Installation Method
+              |
+              +-- Repository
+              +-- Local Package
+              +-- Archive
+              `-- Installer Script
+                       |
+                       v
+              Shared Execution Layer
 ```
 
 The application entry flow coordinates these layers:
@@ -129,12 +150,13 @@ The key separation is:
 Profiles decide which workstation capabilities are wanted.
 Modules declare portable software and operation requirements.
 Capability mappings translate portable intent into distro package names.
+Distribution adapters determine package state and perform package operations.
 External installers define controlled non-standard installation paths.
-Distribution adapters implement package-manager operations.
+State checks determine whether installation work is actually required.
 The execution layer controls how system commands are run.
 ```
 
-This prevents workstation modules from becoming coupled to one Linux distribution, package manager, or vendor-specific installation mechanism.
+This prevents workstation modules from becoming coupled to one Linux distribution, package manager, vendor-specific installation mechanism, or package-state implementation.
 
 ## Component Responsibilities
 
@@ -190,6 +212,8 @@ Detected host information remains separate from the distribution profile selecte
 
 `lib/logging.sh` provides persistent per-session application logging.
 
+Package and external-software state decisions are recorded so skipped and required actions remain visible across repeated bootstrap runs.
+
 ### Terminal UI
 
 `lib/ui.sh` owns human-facing output, prompts, menus, help, version information, and execution summaries.
@@ -226,9 +250,35 @@ distro_validate_environment
 distro_update_package_index
 distro_install_packages
 distro_install_local_package
+distro_package_state
 ```
 
-The first three functions support normal distribution repository operations.
+`distro_package_state` provides distro-specific package-state detection.
+
+The function reports one of:
+
+```text
+installed
+absent
+```
+
+An absent package is a successfully determined state, not an error.
+
+A non-zero return code means that package state could not be determined reliably. The bootstrap treats that as a failure instead of assuming the package is absent.
+
+For the current Debian-family adapters, package state is determined using:
+
+```text
+dpkg-query
+```
+
+The same abstraction allows future distributions to use their native mechanisms:
+
+```text
+Debian family -> dpkg-query
+Fedora        -> rpm or DNF state mechanisms
+Arch          -> pacman state mechanisms
+```
 
 `distro_install_local_package` provides the distro-specific implementation for a previously downloaded local package file.
 
@@ -241,7 +291,7 @@ Ubuntu / Debian / Kali
 apt-get install ./package.deb
 ```
 
-Future adapters can provide their own equivalent operation without changing the external installation framework.
+Future adapters can provide their own equivalent operations without changing the external installation framework.
 
 Package-manager commands remain inside distribution adapters.
 
@@ -285,7 +335,44 @@ Arch   -> xz
 
 A capability may also map to more than one package where a workstation capability requires a package set.
 
+Resolved package names are deduplicated before package-state evaluation.
+
 Missing mappings fail explicitly rather than silently skipping requirements.
+
+### Idempotent Package Installation
+
+Resolved packages are checked before installation.
+
+For each package:
+
+```text
+Resolved package
+       |
+       v
+distro_package_state
+       |
+   +---+---+
+   |       |
+installed absent
+   |       |
+   v       v
+  skip   install
+```
+
+Packages that are already installed are not sent back to the package manager.
+
+For example:
+
+```text
+curl      -> installed -> skip
+xz-utils  -> absent    -> install
+```
+
+If all package requirements for a module are already satisfied, package installation is skipped completely.
+
+Package-state detection remains centralized in distro adapters rather than being duplicated in each module.
+
+This makes repeated bootstrap runs safe and predictable.
 
 ### External Installation Framework
 
@@ -304,7 +391,24 @@ external_id
 external_name
 external_description
 external_method
+external_state
 ```
+
+`external_state` must report:
+
+```text
+installed
+```
+
+or:
+
+```text
+absent
+```
+
+A non-zero return code means the installer could not determine current software state.
+
+Unknown state is treated as an error rather than silently assuming the software is absent.
 
 Supported installation methods are:
 
@@ -328,6 +432,22 @@ An installer may optionally implement:
 
 ```text
 external_validate_environment
+```
+
+Environment validation and installation are only required when `external_state` reports that the software is absent.
+
+If the external software is already installed:
+
+```text
+External installer
+       |
+       v
+ external_state
+       |
+   installed
+       |
+       v
+      skip
 ```
 
 The framework provides controlled helpers for:
@@ -427,13 +547,16 @@ module_apply
 
 `module_capabilities` emits one portable capability identifier per line.
 
-The framework resolves those capabilities using the selected distro package mapping and delegates the resulting package names to:
+The framework:
 
-```text
-distro_install_packages
-```
+1. resolves those capabilities using the selected distro package mapping
+2. checks each resolved package through `distro_package_state`
+3. skips packages already installed
+4. sends only missing packages to `distro_install_packages`
 
-Modules therefore do not need to know whether the selected operating system uses `apt-get`, `dnf`, `pacman`, or another package-management implementation.
+Modules therefore do not implement their own package-state detection.
+
+Modules also do not need to know whether the selected operating system uses `apt-get`, `dnf`, `pacman`, or another package-management implementation.
 
 ### Profile Framework
 
@@ -454,7 +577,7 @@ profile_description
 profile_modules
 ```
 
-Profiles are intentionally declarative. They compose modules without containing package-manager commands, package lists, or duplicated module implementation.
+Profiles are intentionally declarative. They compose modules without containing package-manager commands, package lists, package-state logic, or duplicated module implementation.
 
 ## Execution Flow
 
@@ -502,9 +625,16 @@ Portable capability
 Distro package mapping
        |
        v
-Distribution adapter
+Package state check
        |
-       v
+  +----+----+
+  |         |
+skip     install
+            |
+            v
+Distribution adapter
+            |
+            v
 Shared execution layer
 ```
 
@@ -517,12 +647,19 @@ Workstation module
 External installer definition
        |
        v
+External state check
+       |
+  +----+----+
+  |         |
+skip     install
+            |
+            v
 Explicit installation method
-       |
-       v
+            |
+            v
 External framework helper
-       |
-       v
+            |
+            v
 Distribution adapter and/or
 shared execution layer
 ```
@@ -566,6 +703,9 @@ Portable capabilities
 Ubuntu package mappings
         |
         v
+Package-state checks
+        |
+        v
 Ubuntu adapter
 ```
 
@@ -599,7 +739,35 @@ Fedora -> xz
 Arch   -> xz
 ```
 
-Fedora and Arch are future support targets. Their package managers and mappings should be added through distro adapters and capability mapping files rather than conditions inside shared modules.
+Fedora and Arch are future support targets. Their package managers, state mechanisms, and mappings should be added through distro adapters and capability mapping files rather than conditions inside shared modules.
+
+## Idempotency
+
+Linux Workstation Bootstrap is designed to be safely rerunnable.
+
+A repeated run should evaluate the current workstation state before attempting installation.
+
+For repository packages:
+
+```text
+already installed -> skip
+missing           -> install
+unknown state     -> fail safely
+```
+
+For external software:
+
+```text
+already installed -> skip
+missing           -> execute installer
+unknown state     -> fail safely
+```
+
+A state-check failure is never silently interpreted as absence.
+
+This protects against unnecessary reinstallations and prevents uncertain state from triggering unintended system changes.
+
+Dry-run mode still evaluates current installation state so it can distinguish operations that are already satisfied from operations that would be required.
 
 ## Standard vs External Software
 
@@ -610,6 +778,9 @@ Capability
     |
     v
 Package Mapping
+    |
+    v
+Package State
     |
     v
 Distro Adapter
@@ -669,6 +840,7 @@ Ubuntu, Debian, and Kali Linux package operations additionally require:
 
 * APT
 * `apt-get`
+* `dpkg-query`
 
 Some external installation methods may additionally require utilities such as:
 
@@ -764,6 +936,8 @@ If `XDG_STATE_HOME` is configured, it is used as the state directory instead.
 
 The bootstrap displays the current session log and log directory during execution.
 
+Installation-state decisions, skipped package requirements, missing packages, external-software state checks, installation attempts, and failures are recorded in the session log.
+
 ## Project Structure
 
 ```text
@@ -809,19 +983,29 @@ Concrete workstation modules and profiles are added independently of their share
 
 Linux Workstation Bootstrap is designed to make system changes deliberately and visibly.
 
-Host detection, distribution selection, capability resolution, external installer validation, adapter validation, module validation, profile validation, configuration, logging, and execution logic are separated so operations can be checked before system changes are applied.
+Host detection, distribution selection, capability resolution, package-state detection, external installer validation, external software state detection, adapter validation, module validation, profile validation, configuration, logging, and execution logic are separated so operations can be checked before system changes are applied.
 
 Dry-run mode provides a way to preview execution without applying changes.
+
+Current installation state is evaluated before package or external software installation.
+
+Already-satisfied requirements are skipped.
+
+Unknown or failed state checks stop execution rather than being interpreted as missing software.
 
 Command execution and privilege escalation are centralized so system-changing operations use a consistent execution path.
 
 Distribution-specific package names are isolated in package mapping files.
 
+Distribution-specific package-state checks remain inside distro adapters.
+
 Package-manager commands remain inside distribution adapters.
 
 Modules request portable capabilities instead of embedding distro package names.
 
-External software uses explicit, reviewable installation methods.
+Modules do not duplicate package-state detection logic.
+
+External software uses explicit, reviewable installation methods and explicit installed-state checks.
 
 External downloads require HTTPS.
 
@@ -833,7 +1017,7 @@ Profiles do not contain package-manager commands or duplicate module implementat
 
 Loading a distro adapter, capability mapping, external installer definition, module, or profile does not itself change the workstation.
 
-Artifact integrity and external installer verification are separate concerns that will build on the external installation framework.
+Artifact integrity and external installer verification are separate concerns that build on the external installation framework.
 
 ## Project
 

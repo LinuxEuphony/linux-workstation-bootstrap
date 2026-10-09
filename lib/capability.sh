@@ -204,6 +204,7 @@ resolve_capabilities() {
     local capability
     local package
     local package_output
+    local exit_code
 
     if [[ -z "$result_name" ]]; then
         printf 'Error: no output array was provided for capability resolution.\n' \
@@ -215,19 +216,29 @@ resolve_capabilities() {
         return 2
     fi
 
+    # Namerefs accept variable names, not arbitrary expressions.
+    if [[ ! "$result_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        printf 'Error: invalid output array name for capability resolution: %s\n' \
+            "$result_name" >&2
+
+        return 2
+    fi
+
     shift
 
-    # Bash 5+ is required by the project, so namerefs can safely be used.
-    local -n resolved_packages="$result_name"
+    # The nameref deliberately uses a different local identifier from the
+    # caller-provided array name to avoid circular Bash nameref resolution.
+    local -n output_array_ref="$result_name"
     local -A seen_packages=()
 
-    resolved_packages=()
+    output_array_ref=()
 
     for capability in "$@"; do
         if package_output="$(resolve_capability "$capability")"; then
             :
         else
-            return $?
+            exit_code=$?
+            return "$exit_code"
         fi
 
         while IFS= read -r package; do
@@ -240,7 +251,7 @@ resolve_capabilities() {
             fi
 
             seen_packages["$package"]=1
-            resolved_packages+=("$package")
+            output_array_ref+=("$package")
         done <<<"$package_output"
     done
 

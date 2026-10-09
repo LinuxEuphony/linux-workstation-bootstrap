@@ -10,15 +10,13 @@
 # This file:
 # 1. Loads software-specific installer definitions.
 # 2. Validates external installer contracts and installation methods.
-# 3. Provides predictable temporary staging for downloaded artifacts.
-# 4. Provides controlled helpers for downloads, local packages, archives,
+# 3. Requires explicit installed-state detection for idempotent execution.
+# 4. Skips external installation when the requested software is satisfied.
+# 5. Provides predictable temporary staging for downloaded artifacts.
+# 6. Provides controlled helpers for downloads, local packages, archives,
 #    repository files, and installer scripts.
-# 5. Routes commands through the shared execution layer.
-# 6. Preserves dry-run behaviour.
-#
-# External installer definitions are trusted project code. They should contain
-# declarations and method-specific functions only. They must not perform
-# installation work while being sourced.
+# 7. Routes commands through the shared execution layer.
+# 8. Preserves dry-run behaviour.
 
 LWBS_EXTERNAL_ID=""
 LWBS_EXTERNAL_NAME=""
@@ -27,7 +25,6 @@ LWBS_EXTERNAL_METHOD=""
 LWBS_EXTERNAL_PATH=""
 LWBS_EXTERNAL_STAGE_DIR=""
 
-# Supported external installation methods.
 declare -ar LWBS_EXTERNAL_METHODS=(
     "repository"
     "package"
@@ -35,7 +32,6 @@ declare -ar LWBS_EXTERNAL_METHODS=(
     "script"
 )
 
-# Load an external software installer definition by ID.
 load_external_installer() {
     local requested_installer="${1:-}"
     local installer_directory
@@ -101,7 +97,6 @@ load_external_installer() {
 
     if [[ -z "$LWBS_EXTERNAL_ID" ]]; then
         printf 'Error: external installer returned an empty installer ID.\n' >&2
-        log_error "External installer returned an empty ID: $requested_installer"
         reset_external_installer_contract
         return 1
     fi
@@ -122,9 +117,6 @@ load_external_installer() {
         printf 'Error: external installer returned an empty display name: %s\n' \
             "$requested_installer" >&2
 
-        log_error \
-            "External installer returned an empty display name: $requested_installer"
-
         reset_external_installer_contract
         return 1
     fi
@@ -132,9 +124,6 @@ load_external_installer() {
     if [[ -z "$LWBS_EXTERNAL_DESCRIPTION" ]]; then
         printf 'Error: external installer returned an empty description: %s\n' \
             "$requested_installer" >&2
-
-        log_error \
-            "External installer returned an empty description: $requested_installer"
 
         reset_external_installer_contract
         return 1
@@ -168,7 +157,6 @@ load_external_installer() {
     return 0
 }
 
-# Validate the common interface required from every external installer.
 validate_external_installer_contract() {
     local required_function
 
@@ -177,6 +165,7 @@ validate_external_installer_contract() {
         "external_name"
         "external_description"
         "external_method"
+        "external_state"
     )
 
     for required_function in "${required_functions[@]}"; do
@@ -191,7 +180,6 @@ validate_external_installer_contract() {
     return 0
 }
 
-# Verify that an installation method is supported by the framework.
 is_supported_external_method() {
     local requested_method="${1:-}"
     local supported_method
@@ -205,7 +193,6 @@ is_supported_external_method() {
     return 1
 }
 
-# Require the method-specific implementation hook.
 validate_external_method_contract() {
     local method="${1:-}"
     local required_function
@@ -223,12 +210,62 @@ validate_external_method_contract() {
     return 0
 }
 
-# Execute the external installer currently loaded by load_external_installer().
+# Query the current state reported by the loaded external installer.
+#
+# The installer must return one of:
+#   installed
+#   absent
+#
+# Any non-zero return code means the state could not be determined.
+query_external_installation_state() {
+    local installation_state
+    local exit_code
+
+    if [[ -z "$LWBS_EXTERNAL_ID" ]]; then
+        printf 'Error: no external installer is currently loaded.\n' >&2
+        return 2
+    fi
+
+    if installation_state="$(external_state)"; then
+        :
+    else
+        exit_code=$?
+
+        printf 'Error: unable to determine external software state: %s\n' \
+            "$LWBS_EXTERNAL_ID" >&2
+
+        log_error \
+            "External software state check failed: installer=$LWBS_EXTERNAL_ID exit_code=$exit_code"
+
+        return "$exit_code"
+    fi
+
+    case "$installation_state" in
+        installed | absent)
+            printf '%s\n' "$installation_state"
+            return 0
+            ;;
+
+        *)
+            printf 'Error: external installer "%s" returned invalid state "%s".\n' \
+                "$LWBS_EXTERNAL_ID" \
+                "$installation_state" >&2
+
+            log_error \
+                "Invalid external software state: installer=$LWBS_EXTERNAL_ID state=$installation_state"
+
+            return 1
+            ;;
+    esac
+}
+
 execute_loaded_external_installer() {
     local apply_function
+    local installation_state
     local apply_exit_code=0
     local cleanup_exit_code=0
     local validation_exit_code
+    local state_exit_code
 
     if [[ -z "$LWBS_EXTERNAL_ID" ]]; then
         printf 'Error: no external installer is currently loaded.\n' >&2
@@ -252,10 +289,29 @@ execute_loaded_external_installer() {
     printf '  Method      : %s\n' "$LWBS_EXTERNAL_METHOD"
 
     log_info \
-        "Executing external installer: id=$LWBS_EXTERNAL_ID method=$LWBS_EXTERNAL_METHOD"
+        "Evaluating external installer: id=$LWBS_EXTERNAL_ID method=$LWBS_EXTERNAL_METHOD"
 
-    # Installer definitions may validate software-specific dependencies without
-    # performing installation or configuration work.
+    if installation_state="$(query_external_installation_state)"; then
+        :
+    else
+        state_exit_code=$?
+        return "$state_exit_code"
+    fi
+
+    if [[ "$installation_state" == "installed" ]]; then
+        printf '  Status      : already installed\n'
+        printf '  Action      : skip\n'
+
+        log_info \
+            "External installer skipped because software is already installed: $LWBS_EXTERNAL_ID"
+
+        return 0
+    fi
+
+    printf '  Status      : not installed\n'
+
+    # Installation-specific requirements are evaluated only when an
+    # installation is actually necessary.
     if declare -F external_validate_environment >/dev/null 2>&1; then
         if external_validate_environment; then
             :
@@ -304,13 +360,17 @@ execute_loaded_external_installer() {
         return "$cleanup_exit_code"
     fi
 
-    log_info \
-        "External installer completed successfully: $LWBS_EXTERNAL_ID"
+    if "$LWBS_DRY_RUN"; then
+        log_info \
+            "Dry-run external installer completed: $LWBS_EXTERNAL_ID"
+    else
+        log_info \
+            "External installer completed successfully: $LWBS_EXTERNAL_ID"
+    fi
 
     return 0
 }
 
-# Load and execute an external installer through the controlled framework.
 run_external_installer() {
     local installer_id="${1:-}"
     local exit_code
@@ -325,7 +385,6 @@ run_external_installer() {
     execute_loaded_external_installer
 }
 
-# Prepare a temporary staging location for the current external installer.
 prepare_external_staging() {
     local temp_root
 
@@ -335,7 +394,6 @@ prepare_external_staging() {
 
     temp_root="${TMPDIR:-/tmp}"
 
-    # Dry-run mode uses a predictable virtual path without creating it.
     if "$LWBS_DRY_RUN"; then
         LWBS_EXTERNAL_STAGE_DIR="$temp_root/${LWBS_APP_SLUG}-external-dry-run"
 
@@ -349,9 +407,6 @@ prepare_external_staging() {
         printf 'Error: external staging root is not writable: %s\n' \
             "$temp_root" >&2
 
-        log_error \
-            "External staging root is unavailable: $temp_root"
-
         return 1
     fi
 
@@ -360,10 +415,6 @@ prepare_external_staging() {
     )"; then
         printf 'Error: unable to create external installation staging directory.\n' \
             >&2
-
-        log_error \
-            "Unable to create external installation staging directory."
-
         return 1
     fi
 
@@ -375,7 +426,6 @@ prepare_external_staging() {
     return 0
 }
 
-# Remove temporary external installer files after execution.
 cleanup_external_staging() {
     local stage_directory="$LWBS_EXTERNAL_STAGE_DIR"
 
@@ -406,7 +456,6 @@ cleanup_external_staging() {
     return 1
 }
 
-# Resolve a safe file path inside the external installer staging directory.
 external_stage_path() {
     local filename="${1:-}"
 
@@ -428,7 +477,6 @@ external_stage_path() {
         "$filename"
 }
 
-# Download an external artifact using HTTPS.
 external_download() {
     local url="${1:-}"
     local destination="${2:-}"
@@ -436,11 +484,9 @@ external_download() {
     if [[ -z "$url" || -z "$destination" ]]; then
         printf 'Error: external download requires a URL and destination.\n' \
             >&2
-
         return 2
     fi
 
-    # Remote installation artifacts must use encrypted transport.
     if [[ ! "$url" =~ ^https://[^[:space:]]+$ ]]; then
         printf 'Error: external download URL must use HTTPS.\n' >&2
 
@@ -453,7 +499,6 @@ external_download() {
     if [[ "$destination" != /* ]]; then
         printf 'Error: external download destination must be an absolute path.\n' \
             >&2
-
         return 2
     fi
 
@@ -476,7 +521,6 @@ external_download() {
         "$url"
 }
 
-# Install a local distribution package through the selected distro adapter.
 external_install_local_package() {
     local package_file="${1:-}"
 
@@ -494,9 +538,6 @@ external_install_local_package() {
         printf 'Error: the loaded distribution adapter cannot install local packages.\n' \
             >&2
 
-        log_error \
-            "Distribution adapter is missing distro_install_local_package."
-
         return 1
     fi
 
@@ -507,13 +548,9 @@ external_install_local_package() {
         return 1
     fi
 
-    log_info \
-        "Installing external local package: installer=$LWBS_EXTERNAL_ID"
-
     distro_install_local_package "$package_file"
 }
 
-# Install a prepared repository or keyring file into a privileged system path.
 external_install_system_file() {
     local source_file="${1:-}"
     local destination="${2:-}"
@@ -522,28 +559,24 @@ external_install_system_file() {
     if [[ -z "$source_file" || -z "$destination" ]]; then
         printf 'Error: system file installation requires source and destination paths.\n' \
             >&2
-
         return 2
     fi
 
     if [[ "$source_file" != /* || "$destination" != /* ]]; then
         printf 'Error: system file installation paths must be absolute.\n' \
             >&2
-
         return 2
     fi
 
     if [[ ! "$mode" =~ ^0?[0-7]{3,4}$ ]]; then
         printf 'Error: invalid system file mode: %s\n' \
             "$mode" >&2
-
         return 2
     fi
 
     if ! "$LWBS_DRY_RUN" && [[ ! -f "$source_file" ]]; then
         printf 'Error: source file not found: %s\n' \
             "$source_file" >&2
-
         return 1
     fi
 
@@ -554,22 +587,20 @@ external_install_system_file() {
         -- "$source_file" "$destination"
 }
 
-# Extract a tar-compatible archive to a destination directory.
 external_extract_tar_archive() {
     local archive_file="${1:-}"
     local destination="${2:-}"
+    local exit_code
 
     if [[ -z "$archive_file" || -z "$destination" ]]; then
         printf 'Error: archive extraction requires an archive and destination.\n' \
             >&2
-
         return 2
     fi
 
     if [[ "$archive_file" != /* || "$destination" != /* ]]; then
         printf 'Error: archive and destination paths must be absolute.\n' \
             >&2
-
         return 2
     fi
 
@@ -580,12 +611,14 @@ external_extract_tar_archive() {
     if ! "$LWBS_DRY_RUN" && [[ ! -f "$archive_file" ]]; then
         printf 'Error: archive file not found: %s\n' \
             "$archive_file" >&2
-
         return 1
     fi
 
-    if ! run_command mkdir -p -- "$destination"; then
-        return $?
+    if run_command mkdir -p -- "$destination"; then
+        :
+    else
+        exit_code=$?
+        return "$exit_code"
     fi
 
     run_command \
@@ -594,22 +627,20 @@ external_extract_tar_archive() {
         -C "$destination"
 }
 
-# Extract a ZIP archive to a destination directory.
 external_extract_zip_archive() {
     local archive_file="${1:-}"
     local destination="${2:-}"
+    local exit_code
 
     if [[ -z "$archive_file" || -z "$destination" ]]; then
         printf 'Error: ZIP extraction requires an archive and destination.\n' \
             >&2
-
         return 2
     fi
 
     if [[ "$archive_file" != /* || "$destination" != /* ]]; then
         printf 'Error: archive and destination paths must be absolute.\n' \
             >&2
-
         return 2
     fi
 
@@ -620,12 +651,14 @@ external_extract_zip_archive() {
     if ! "$LWBS_DRY_RUN" && [[ ! -f "$archive_file" ]]; then
         printf 'Error: ZIP archive file not found: %s\n' \
             "$archive_file" >&2
-
         return 1
     fi
 
-    if ! run_command mkdir -p -- "$destination"; then
-        return $?
+    if run_command mkdir -p -- "$destination"; then
+        :
+    else
+        exit_code=$?
+        return "$exit_code"
     fi
 
     run_command \
@@ -635,10 +668,6 @@ external_extract_zip_archive() {
         -d "$destination"
 }
 
-# Execute a staged installer script through an explicitly selected interpreter.
-#
-# URLs and command strings are intentionally not accepted here. The script
-# must first be downloaded to a local file so its handling remains explicit.
 external_run_script_file() {
     local interpreter="${1:-}"
     local script_file="${2:-}"
@@ -646,14 +675,12 @@ external_run_script_file() {
     if [[ -z "$interpreter" || -z "$script_file" ]]; then
         printf 'Error: script execution requires an interpreter and script file.\n' \
             >&2
-
         return 2
     fi
 
     if [[ ! "$interpreter" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
         printf 'Error: invalid installer script interpreter: %s\n' \
             "$interpreter" >&2
-
         return 2
     fi
 
@@ -669,7 +696,6 @@ external_run_script_file() {
     if ! "$LWBS_DRY_RUN" && [[ ! -f "$script_file" ]]; then
         printf 'Error: installer script file not found: %s\n' \
             "$script_file" >&2
-
         return 1
     fi
 
@@ -681,13 +707,13 @@ external_run_script_file() {
         "$script_file"
 }
 
-# Remove functions and state belonging to the current external installer.
 reset_external_installer_contract() {
     unset -f \
         external_id \
         external_name \
         external_description \
         external_method \
+        external_state \
         external_validate_environment \
         external_repository_apply \
         external_package_apply \

@@ -9,10 +9,11 @@
 #
 # This file:
 # 1. Validates the Ubuntu package-management environment.
-# 2. Refreshes the package index.
-# 3. Installs repository packages.
-# 4. Installs local distribution package files.
-# 5. Routes privileged package operations through the shared execution layer.
+# 2. Detects whether repository packages are already installed.
+# 3. Refreshes the package index.
+# 4. Installs repository packages.
+# 5. Installs local distribution package files.
+# 6. Routes privileged package operations through the shared execution layer.
 
 distro_validate_environment() {
     if [[ -z "${SYSTEM_DISTRO_FAMILY:-}" ]]; then
@@ -50,9 +51,71 @@ distro_validate_environment() {
         return 1
     fi
 
+    if ! require_command dpkg-query; then
+        log_error "Ubuntu adapter requires dpkg-query but it is unavailable."
+        return 1
+    fi
+
     log_info "Ubuntu distribution adapter environment validated."
 
     return 0
+}
+
+# Report whether a package is installed.
+#
+# Output:
+#   installed
+#   absent
+#
+# A successfully determined absent package still returns zero. Non-zero
+# return values are reserved for state-check failures.
+distro_package_state() {
+    local package="${1:-}"
+    local package_status
+    local exit_code
+
+    if [[ -z "$package" ]]; then
+        printf 'Error: no Ubuntu package was provided for state checking.\n' >&2
+        return 2
+    fi
+
+    if [[ ! "$package" =~ ^[A-Za-z0-9][A-Za-z0-9.+:_-]*$ ]]; then
+        printf 'Error: invalid Ubuntu package identifier: %s\n' \
+            "$package" >&2
+        return 2
+    fi
+
+    if package_status="$(
+        dpkg-query \
+            -W \
+            -f='${db:Status-Status}' \
+            -- "$package" \
+            2>/dev/null
+    )"; then
+        if [[ "$package_status" == "installed" ]]; then
+            printf '%s\n' "installed"
+        else
+            printf '%s\n' "absent"
+        fi
+
+        return 0
+    else
+        exit_code=$?
+    fi
+
+    # dpkg-query returns 1 when the requested package is unknown or absent.
+    if ((exit_code == 1)); then
+        printf '%s\n' "absent"
+        return 0
+    fi
+
+    printf 'Error: unable to determine Ubuntu package state: %s\n' \
+        "$package" >&2
+
+    log_error \
+        "Ubuntu package state check failed: package=$package exit_code=$exit_code"
+
+    return "$exit_code"
 }
 
 distro_update_package_index() {
@@ -98,7 +161,6 @@ distro_install_local_package() {
     if ! "$LWBS_DRY_RUN" && [[ ! -f "$package_file" ]]; then
         printf 'Error: local Ubuntu package file not found: %s\n' \
             "$package_file" >&2
-
         return 1
     fi
 
