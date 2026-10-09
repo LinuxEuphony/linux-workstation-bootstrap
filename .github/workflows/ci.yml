@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  syntax:
+    name: Bash Syntax
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Validate Bash syntax
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          mapfile -d '' -t shell_files < <(
+            git ls-files -z -- '*.sh' 'bin/*'
+          )
+
+          if ((${#shell_files[@]} == 0)); then
+            echo "No shell files were found."
+            exit 1
+          fi
+
+          printf 'Validating %d shell file(s).\n' "${#shell_files[@]}"
+
+          for shell_file in "${shell_files[@]}"; do
+            bash -n "$shell_file"
+          done
+
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install \
+            --yes \
+            --no-install-recommends \
+            shellcheck
+
+      - name: Show ShellCheck version
+        run: shellcheck --version
+
+      - name: Run ShellCheck
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          mapfile -d '' -t shell_files < <(
+            git ls-files -z -- '*.sh' 'bin/*'
+          )
+
+          if ((${#shell_files[@]} == 0)); then
+            echo "No shell files were found."
+            exit 1
+          fi
+
+          printf 'Checking %d shell file(s).\n' "${#shell_files[@]}"
+
+          shellcheck -x "${shell_files[@]}"
+
+  formatting:
+    name: Shell Formatting
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install shfmt
+        run: |
+          sudo apt-get update
+          sudo apt-get install \
+            --yes \
+            --no-install-recommends \
+            shfmt
+
+      - name: Show shfmt version
+        run: shfmt --version
+
+      - name: Validate shell formatting
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          mapfile -d '' -t shell_files < <(
+            git ls-files -z -- '*.sh' 'bin/*'
+          )
+
+          if ((${#shell_files[@]} == 0)); then
+            echo "No shell files were found."
+            exit 1
+          fi
+
+          printf 'Checking formatting for %d shell file(s).\n' \
+            "${#shell_files[@]}"
+
+          shfmt \
+            -d \
+            -i 4 \
+            -ci \
+            "${shell_files[@]}"
+
+  tests:
+    name: Bootstrap Tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Run bootstrap test suite
+        run: bash tests/run.sh
