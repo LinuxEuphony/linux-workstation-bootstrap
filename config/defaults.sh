@@ -9,7 +9,8 @@
 # 2. Defines runtime requirements.
 # 3. Defines supported distribution profiles.
 # 4. Defines distribution, package manager, and architecture mappings.
-# 5. Defines persistent logging defaults.
+# 5. Defines user-configuration defaults and locations.
+# 6. Defines persistent logging defaults.
 
 # Application identity.
 readonly LWBS_APP_NAME="Linux Workstation Bootstrap"
@@ -35,6 +36,18 @@ declare -Ar LWBS_DISTRO_DISPLAY_NAMES=(
     [debian]="Debian"
     [kali]="Kali Linux"
 )
+
+# Default distribution selection behaviour.
+#
+# "auto" means the bootstrap should use normal host detection and
+# confirmation rather than forcing a specific distribution profile.
+readonly LWBS_DEFAULT_DISTRO_PROFILE="auto"
+
+# User configuration location.
+#
+# The actual root is resolved from XDG_CONFIG_HOME or ~/.config at runtime.
+readonly LWBS_CONFIG_DIRECTORY_NAME="$LWBS_APP_SLUG"
+readonly LWBS_CONFIG_FILE_NAME="config.conf"
 
 # Distribution-to-family mappings.
 # Additional distributions may be detected even when they do not yet
