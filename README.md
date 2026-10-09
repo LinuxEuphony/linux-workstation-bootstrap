@@ -2,7 +2,7 @@
 
 A reusable, distro-aware Linux workstation bootstrap utility for preparing and configuring Linux workstations in a consistent and controlled way.
 
-Linux Workstation Bootstrap is being built as a modular replacement for a single large workstation setup script. It separates host detection, command execution, distribution-specific behavior, installable capabilities, and workstation profiles so that each concern can evolve independently.
+Linux Workstation Bootstrap is a modular replacement for a monolithic workstation setup script. It separates host detection, portable software intent, distribution-specific package resolution, command execution, installable capabilities, and workstation profiles so each concern can evolve independently.
 
 ## Current Capabilities
 
@@ -24,8 +24,10 @@ The current bootstrap foundation provides:
 * Ubuntu package-management adapter
 * Debian package-management adapter
 * Kali Linux package-management adapter
+* Portable package capability resolution
+* Independent package mappings per distribution profile
 * Controlled workstation module loading and validation
-* Module package requirement handling
+* Module capability requirement handling
 * Optional module operation hooks
 * Controlled workstation profile loading and validation
 * Declarative profile-to-module composition
@@ -40,32 +42,34 @@ Supported distribution profiles:
 
 Current distribution adapter status:
 
-| Distribution | Adapter |
-| --- | --- |
-| Ubuntu | Implemented |
-| Debian | Implemented |
-| Kali Linux | Implemented |
+| Distribution | Adapter | Package Mapping |
+| --- | --- | --- |
+| Ubuntu | Implemented | Implemented |
+| Debian | Implemented | Implemented |
+| Kali Linux | Implemented | Implemented |
 
 ## Architecture
 
-The project is intentionally split into layers rather than combining host detection, package installation, prompts, and system changes in one script.
+The project separates workstation intent from distro-specific implementation.
 
 ```text
 Workstation Profile
-        │
-        ▼
+        |
+        v
       Modules
-        │
-        ▼
-  Module Framework
-        │
-        ▼
+        |
+        | capabilities
+        v
+Capability Resolver
+        |
+        | distro package mapping
+        v
 Distribution Adapter
-        │
-        ▼
+        |
+        v
  Execution Layer
-        │
-        ▼
+        |
+        v
 System Package Manager
 ```
 
@@ -73,35 +77,37 @@ The application entry flow coordinates these layers:
 
 ```text
 User
-  │
-  ▼
+  |
+  v
 bin/linux-workstation-bootstrap
-  │
-  ▼
+  |
+  v
 lib/bootstrap.sh
-  │
-  ├── Configuration
-  ├── CLI parsing
-  ├── Logging
-  ├── Runtime validation
-  ├── System detection
-  ├── Terminal UI
-  ├── Execution framework
-  ├── Distribution adapter framework
-  ├── Module framework
-  └── Profile framework
+  |
+  +-- Configuration
+  +-- CLI parsing
+  +-- Logging
+  +-- Runtime validation
+  +-- System detection
+  +-- Terminal UI
+  +-- Execution framework
+  +-- Distribution adapter framework
+  +-- Capability resolution
+  +-- Module framework
+  `-- Profile framework
 ```
 
 The key separation is:
 
 ```text
 Profiles decide which capabilities are wanted.
-Modules define what those capabilities require.
-Distribution adapters implement how the operating system satisfies them.
+Modules declare portable software and operation requirements.
+Capability mappings translate software intent into distro package names.
+Distribution adapters implement package-manager operations.
 The execution layer controls how system commands are run.
 ```
 
-This prevents workstation intent from becoming coupled to one Linux distribution or package manager.
+This prevents workstation modules from becoming coupled to one Linux distribution or package manager.
 
 ## Component Responsibilities
 
@@ -113,15 +119,18 @@ It enables safe Bash behavior, resolves the project root, loads the bootstrap or
 
 ### Configuration
 
-`config/defaults.sh` contains built-in application defaults and platform mappings, including:
+`config/defaults.sh` contains built-in application defaults and platform mappings.
 
-* application identity and version
-* minimum Bash version
-* supported distributions
-* distro-family mappings
-* package-manager mappings
-* architecture normalization
-* logging defaults
+Distribution-specific package mappings live separately under:
+
+```text
+config/packages/
+├── debian.sh
+├── kali.sh
+└── ubuntu.sh
+```
+
+This separation keeps package names out of shared module implementations.
 
 ### Bootstrap Orchestration
 
@@ -191,7 +200,42 @@ distro_update_package_index
 distro_install_packages
 ```
 
-Shared application and module code does not call `apt-get` directly.
+Package-manager commands remain inside the adapters.
+
+### Capability Resolution
+
+`lib/capability.sh` translates portable capability identifiers into package names for the selected distribution profile.
+
+For example, a module can request:
+
+```text
+xz
+```
+
+without knowing that the Debian-family package is:
+
+```text
+xz-utils
+```
+
+The mapping is selected independently for each distro:
+
+```text
+Module capability
+       |
+       v
+      xz
+       |
+       +-- Ubuntu -> xz-utils
+       +-- Debian -> xz-utils
+       `-- Kali   -> xz-utils
+```
+
+Future distributions can provide a different package name without changing the module.
+
+A capability may also map to more than one package where a workstation capability requires a package set.
+
+Missing mappings fail explicitly rather than silently skipping requirements.
 
 ### Module Framework
 
@@ -209,7 +253,7 @@ Every module implements:
 module_id
 module_name
 module_description
-module_packages
+module_capabilities
 ```
 
 A module may optionally implement:
@@ -218,9 +262,15 @@ A module may optionally implement:
 module_apply
 ```
 
-Package requirements are delegated to the selected distribution adapter.
+`module_capabilities` emits one portable capability identifier per line.
 
-A module therefore describes **what capability is required**, while the distro adapter determines **how that capability is installed on the operating system**.
+The framework resolves those capabilities using the selected distro package mapping and delegates the resulting package names to:
+
+```text
+distro_install_packages
+```
+
+Modules therefore do not need to know whether the selected operating system uses `apt-get`, `dnf`, or another package-management implementation.
 
 ### Profile Framework
 
@@ -241,68 +291,65 @@ profile_description
 profile_modules
 ```
 
-`profile_modules` declares one module ID per line.
-
-Profiles are intentionally declarative. They do not contain package-manager commands, package lists, or system-changing operation hooks.
-
-Before a profile can be accepted, every referenced module is loaded and validated.
-
-Profile execution then runs those modules in declaration order through the shared module framework.
+Profiles are intentionally declarative. They compose modules without containing package-manager commands, package lists, or duplicated module implementation.
 
 ## Execution Flow
 
-The bootstrap foundation establishes the host and distribution layer:
+The bootstrap establishes the host and distro-specific foundation:
 
 ```text
 Parse CLI arguments
-       │
-       ▼
+       |
+       v
 Initialize logging
-       │
-       ▼
+       |
+       v
 Validate runtime
-       │
-       ▼
+       |
+       v
 Detect host system
-       │
-       ▼
+       |
+       v
 Select distribution profile
-       │
-       ▼
+       |
+       v
 Load distribution adapter
-       │
-       ▼
+       |
+       v
 Validate adapter environment
+       |
+       v
+Load distro capability mapping
 ```
 
-The workstation configuration layers build on that foundation:
+Workstation configuration then builds on that foundation:
 
 ```text
 Select workstation profile
-       │
-       ▼
+       |
+       v
 Load profile
-       │
-       ▼
-Validate profile contract
-       │
-       ▼
+       |
+       v
 Validate referenced modules
-       │
-       ▼
-Execute modules in profile order
-       │
-       ▼
-Resolve module requirements
-       │
-       ▼
+       |
+       v
+Execute module
+       |
+       v
+Resolve module capabilities
+       |
+       v
+Distro-specific package names
+       |
+       v
 Selected distro adapter
-       │
-       ▼
+       |
+       v
 Shared execution layer
 ```
 
-Workstation profile selection through the public CLI is introduced separately. Loading the profile framework itself does not install software.
+Workstation profile selection through the public CLI is introduced separately. Loading the framework itself does not install software.
 
 ## Distribution Profiles vs Workstation Profiles
 
@@ -330,15 +377,53 @@ For example:
 Ubuntu distribution profile
         +
 Developer workstation profile
-        │
-        ▼
+        |
+        v
 Developer modules
-        │
-        ▼
+        |
+        v
+Portable capabilities
+        |
+        v
+Ubuntu package mappings
+        |
+        v
 Ubuntu adapter
 ```
 
-Keeping these concepts separate allows the same workstation profile to eventually operate across multiple supported Linux distributions.
+Keeping these concepts separate allows the same workstation profile and modules to operate across multiple Linux distributions.
+
+## Package Capability Model
+
+Capability identifiers represent software intent rather than package-manager syntax.
+
+Examples:
+
+```text
+curl
+wget
+nano
+sed
+dos2unix
+xz
+figlet
+```
+
+The identifiers should remain stable even when distro package names differ.
+
+For example, a future Fedora mapping can resolve:
+
+```text
+xz -> xz
+```
+
+while Debian-family mappings continue to resolve:
+
+```text
+xz -> xz-utils
+```
+
+Adding Fedora therefore requires a Fedora adapter and Fedora capability mappings, not Fedora-specific conditions throughout shared modules.
 
 ## Modules and Profiles
 
@@ -365,8 +450,6 @@ developer profile
 ├── containers
 └── database tooling
 ```
-
-A security-focused profile could reuse some of those same modules while selecting additional security capabilities.
 
 ## Requirements
 
@@ -405,7 +488,7 @@ Run the bootstrap:
 ./bin/linux-workstation-bootstrap
 ```
 
-The detected system configuration is displayed before a distribution profile is selected and its adapter is loaded.
+The detected system configuration is displayed before a distribution profile, adapter, and package capability mapping are selected.
 
 ## Usage
 
@@ -472,10 +555,15 @@ linux-workstation-bootstrap/
 ├── bin/
 │   └── linux-workstation-bootstrap
 ├── config/
-│   └── defaults.sh
+│   ├── defaults.sh
+│   └── packages/
+│       ├── debian.sh
+│       ├── kali.sh
+│       └── ubuntu.sh
 ├── lib/
 │   ├── arguments.sh
 │   ├── bootstrap.sh
+│   ├── capability.sh
 │   ├── core.sh
 │   ├── detect.sh
 │   ├── distro.sh
@@ -491,7 +579,8 @@ linux-workstation-bootstrap/
 ├── modules/
 ├── profiles/
 ├── tests/
-└── docs/
+├── docs/
+└── README.md
 ```
 
 Concrete workstation modules and profiles are added independently from their shared frameworks.
@@ -500,19 +589,21 @@ Concrete workstation modules and profiles are added independently from their sha
 
 Linux Workstation Bootstrap is designed to make system changes deliberately and visibly.
 
-Host detection, distribution selection, adapter validation, module validation, profile validation, configuration, logging, and execution logic are separated so operations can be checked before system changes are applied.
+Host detection, distribution selection, capability resolution, adapter validation, module validation, profile validation, configuration, logging, and execution logic are separated so operations can be checked before system changes are applied.
 
 Dry-run mode provides a way to preview execution without applying changes.
 
-Command execution and privilege escalation are centralized so system-changing operations use a consistent execution path. Command arguments are not blindly written to logs because future operations may contain credentials, tokens, sensitive URLs, or other values that should not be persisted.
+Command execution and privilege escalation are centralized so system-changing operations use a consistent execution path.
 
-Distribution-specific operations are isolated behind a validated adapter contract.
+Distribution-specific package names are isolated in package mapping files.
 
-Modules do not call package managers directly.
+Package-manager commands remain inside distribution adapters.
+
+Modules request portable capabilities instead of embedding distro package names.
 
 Profiles do not contain package-manager commands or duplicate module implementation.
 
-Loading a distro adapter, module, or profile does not itself change the workstation.
+Loading a distro adapter, capability mapping, module, or profile does not itself change the workstation.
 
 ## Project
 
