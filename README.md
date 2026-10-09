@@ -2,7 +2,7 @@
 
 A reusable, distro-aware Linux workstation bootstrap utility for preparing and configuring Linux workstations in a consistent and controlled way.
 
-Linux Workstation Bootstrap is a modular replacement for a monolithic workstation setup script. It separates host detection, portable software intent, distribution-specific package resolution, external software installation, installation-state detection, command execution, installable capabilities, and workstation profiles so each concern can evolve independently.
+Linux Workstation Bootstrap is a modular replacement for a monolithic workstation setup script. It separates host detection, portable software intent, distribution-specific package resolution, external software installation, installation-state detection, user configuration, command execution, installable capabilities, and workstation profiles so each concern can evolve independently.
 
 ## Current Capabilities
 
@@ -15,6 +15,9 @@ The current bootstrap foundation provides:
 * Package-manager identification
 * Interactive distribution profile confirmation and selection
 * Command-line distribution profile override
+* Optional user-local configuration
+* Deterministic configuration precedence
+* Validation of supported user configuration values
 * Dry-run execution mode
 * Persistent per-session logging
 * Centralized application configuration
@@ -60,6 +63,18 @@ Current distribution adapter status:
 ## Architecture
 
 The project separates workstation intent from distro-specific implementation.
+
+Configuration is resolved using deterministic precedence:
+
+```text
+Repository Defaults
+        |
+        v
+User Configuration
+        |
+        v
+Command-Line Arguments
+```
 
 Standard repository software follows the capability path:
 
@@ -130,9 +145,10 @@ bin/linux-workstation-bootstrap
   v
 lib/bootstrap.sh
   |
-  +-- Configuration
+  +-- Repository defaults
   +-- CLI parsing
   +-- Logging
+  +-- User configuration
   +-- Runtime validation
   +-- System detection
   +-- Terminal UI
@@ -147,6 +163,9 @@ lib/bootstrap.sh
 The key separation is:
 
 ```text
+Repository defaults define built-in behaviour.
+User configuration provides safe local overrides.
+CLI arguments provide the highest-precedence runtime selections.
 Profiles decide which workstation capabilities are wanted.
 Modules declare portable software and operation requirements.
 Capability mappings translate portable intent into distro package names.
@@ -156,7 +175,7 @@ State checks determine whether installation work is actually required.
 The execution layer controls how system commands are run.
 ```
 
-This prevents workstation modules from becoming coupled to one Linux distribution, package manager, vendor-specific installation mechanism, or package-state implementation.
+This prevents workstation modules from becoming coupled to one Linux distribution, package manager, vendor-specific installation mechanism, package-state implementation, or machine-specific configuration.
 
 ## Component Responsibilities
 
@@ -168,7 +187,22 @@ It enables safe Bash behavior, resolves the project root, loads the bootstrap or
 
 ### Configuration
 
-`config/defaults.sh` contains built-in application defaults and platform mappings.
+Repository-managed defaults live in:
+
+```text
+config/defaults.sh
+```
+
+They define built-in application values such as:
+
+* application identity and version
+* minimum Bash version
+* supported distribution profiles
+* distro-family mappings
+* package-manager mappings
+* architecture normalization
+* user configuration location
+* logging defaults
 
 Distribution-specific package mappings live separately under:
 
@@ -179,17 +213,164 @@ config/packages/
 └── ubuntu.sh
 ```
 
-This separation keeps distro-specific package names out of shared module implementations.
+User configuration is handled by:
+
+```text
+lib/config.sh
+```
+
+The normal user configuration path is:
+
+```text
+~/.config/linux-workstation-bootstrap/config.conf
+```
+
+If `XDG_CONFIG_HOME` is configured, it is used instead of `~/.config`.
+
+User configuration is optional. The bootstrap operates normally when the file does not exist.
+
+Configuration precedence is:
+
+```text
+repository defaults
+        |
+        v
+user configuration
+        |
+        v
+CLI arguments
+```
+
+CLI arguments therefore remain the highest-precedence runtime input.
+
+### User Configuration
+
+User configuration allows supported defaults to be changed without editing repository-managed files.
+
+The configuration file is parsed as data rather than sourced as shell code.
+
+A minimal example is:
+
+```ini
+# Linux Workstation Bootstrap
+
+distro_profile=ubuntu
+```
+
+The currently supported setting is:
+
+```text
+distro_profile
+```
+
+Supported values are:
+
+```text
+auto
+ubuntu
+debian
+kali
+```
+
+`auto` preserves normal host detection and interactive selection behaviour.
+
+For example:
+
+```ini
+distro_profile=ubuntu
+```
+
+sets Ubuntu as the user's default distribution profile.
+
+However:
+
+```bash
+./bin/linux-workstation-bootstrap \
+  --distro debian \
+  --dry-run
+```
+
+still selects Debian because the CLI has higher precedence.
+
+Unsupported settings fail clearly rather than being silently ignored.
+
+For example:
+
+```ini
+magic_setting=true
+```
+
+is rejected.
+
+Duplicate settings are also rejected:
+
+```ini
+distro_profile=ubuntu
+distro_profile=debian
+```
+
+This prevents ambiguous configuration.
+
+The user configuration parser does not perform shell expansion, command substitution, or arbitrary code execution.
+
+Values such as:
+
+```text
+$(command)
+```
+
+are treated as configuration data and rejected when they are not valid for the setting.
+
+Internal constants that are not explicitly exposed as user settings remain controlled by repository configuration.
 
 ### Bootstrap Orchestration
 
 `lib/bootstrap.sh` coordinates the application lifecycle.
 
-It determines the order in which shared components operate but does not contain distro-specific package commands, external software implementations, or workstation module implementations.
+Its current startup order is:
+
+```text
+Parse CLI
+    |
+    v
+Handle help/version
+    |
+    v
+Initialize logging
+    |
+    v
+Load user configuration
+    |
+    v
+Validate runtime
+    |
+    v
+Detect system
+    |
+    v
+Resolve distribution profile
+    |
+    v
+Load distro adapter
+    |
+    v
+Load package capability mapping
+```
+
+The bootstrap orchestrator does not contain distro-specific package commands, external software implementations, or workstation module implementations.
 
 ### CLI Handling
 
-`lib/arguments.sh` parses command-line options and records runtime selections such as dry-run mode and distribution-profile overrides.
+`lib/arguments.sh` parses command-line options and records runtime selections such as:
+
+* dry-run mode
+* non-interactive confirmation
+* distribution-profile overrides
+* informational actions
+
+CLI selections remain separate from user configuration state.
+
+This makes precedence explicit rather than rewriting CLI state while configuration is loaded.
 
 ### Core Utilities
 
@@ -212,7 +393,9 @@ Detected host information remains separate from the distribution profile selecte
 
 `lib/logging.sh` provides persistent per-session application logging.
 
-Package and external-software state decisions are recorded so skipped and required actions remain visible across repeated bootstrap runs.
+Configuration loading and selection decisions are recorded without executing or blindly persisting arbitrary user-supplied shell content.
+
+Package and external-software state decisions are also recorded so skipped and required actions remain visible across repeated bootstrap runs.
 
 ### Terminal UI
 
@@ -276,8 +459,8 @@ The same abstraction allows future distributions to use their native mechanisms:
 
 ```text
 Debian family -> dpkg-query
-Fedora        -> rpm or DNF state mechanisms
-Arch          -> pacman state mechanisms
+Fedora        -> RPM or DNF state mechanisms
+Arch          -> Pacman state mechanisms
 ```
 
 `distro_install_local_package` provides the distro-specific implementation for a previously downloaded local package file.
@@ -579,6 +762,57 @@ profile_modules
 
 Profiles are intentionally declarative. They compose modules without containing package-manager commands, package lists, package-state logic, or duplicated module implementation.
 
+## Configuration Precedence
+
+Runtime configuration follows:
+
+```text
+repository defaults
+        |
+        v
+user-local configuration
+        |
+        v
+explicit CLI arguments
+```
+
+For example:
+
+```text
+repository default : auto
+user configuration: ubuntu
+CLI --distro       : debian
+```
+
+results in:
+
+```text
+debian
+```
+
+If no CLI override is present:
+
+```text
+repository default : auto
+user configuration: ubuntu
+```
+
+results in:
+
+```text
+ubuntu
+```
+
+If no user configuration exists:
+
+```text
+repository default : auto
+```
+
+normal host detection and profile-selection behaviour applies.
+
+This precedence model will also support future workstation profile and module configuration without requiring repository-managed files to contain machine-specific preferences.
+
 ## Execution Flow
 
 The bootstrap establishes the host and distro-specific foundation:
@@ -590,13 +824,16 @@ Parse CLI arguments
 Initialize logging
        |
        v
+Load user configuration
+       |
+       v
 Validate runtime
        |
        v
 Detect host system
        |
        v
-Select distribution profile
+Resolve distribution profile
        |
        v
 Load distribution adapter
@@ -606,6 +843,27 @@ Validate adapter environment
        |
        v
 Load distro capability mapping
+```
+
+Distribution-profile resolution follows:
+
+```text
+CLI --distro specified?
+        |
+   +----+----+
+   |         |
+  yes        no
+   |         |
+   v         v
+ use CLI   user config set?
+               |
+          +----+----+
+          |         |
+         yes        no
+          |         |
+          v         v
+      use config   detection /
+                   interaction
 ```
 
 Workstation configuration then builds on that foundation.
@@ -745,7 +1003,7 @@ Fedora and Arch are future support targets. Their package managers, state mechan
 
 Linux Workstation Bootstrap is designed to be safely rerunnable.
 
-A repeated run should evaluate the current workstation state before attempting installation.
+A repeated run evaluates the current workstation state before attempting installation.
 
 For repository packages:
 
@@ -922,6 +1180,34 @@ Examples:
 
 Selecting a different distribution profile does not alter the detected host information.
 
+An explicit `--distro` option overrides `distro_profile` from user configuration.
+
+## User Configuration Example
+
+Create the configuration directory:
+
+```bash
+mkdir -p ~/.config/linux-workstation-bootstrap
+```
+
+Create:
+
+```text
+~/.config/linux-workstation-bootstrap/config.conf
+```
+
+Example:
+
+```ini
+# Linux Workstation Bootstrap
+
+distro_profile=ubuntu
+```
+
+The file is user-local and lives outside the repository.
+
+Do not store machine-specific preferences in `config/defaults.sh`.
+
 ## Logging
 
 Each bootstrap execution creates a dedicated session log.
@@ -936,7 +1222,7 @@ If `XDG_STATE_HOME` is configured, it is used as the state directory instead.
 
 The bootstrap displays the current session log and log directory during execution.
 
-Installation-state decisions, skipped package requirements, missing packages, external-software state checks, installation attempts, and failures are recorded in the session log.
+Configuration loading, selection precedence, installation-state decisions, skipped package requirements, missing packages, external-software state checks, installation attempts, and failures are recorded in the session log.
 
 ## Project Structure
 
@@ -954,6 +1240,7 @@ linux-workstation-bootstrap/
 │   ├── arguments.sh
 │   ├── bootstrap.sh
 │   ├── capability.sh
+│   ├── config.sh
 │   ├── core.sh
 │   ├── detect.sh
 │   ├── distro.sh
@@ -983,7 +1270,17 @@ Concrete workstation modules and profiles are added independently of their share
 
 Linux Workstation Bootstrap is designed to make system changes deliberately and visibly.
 
-Host detection, distribution selection, capability resolution, package-state detection, external installer validation, external software state detection, adapter validation, module validation, profile validation, configuration, logging, and execution logic are separated so operations can be checked before system changes are applied.
+Repository defaults, user-local configuration, CLI arguments, host detection, distribution selection, capability resolution, package-state detection, external installer validation, external software state detection, adapter validation, module validation, profile validation, logging, and execution logic are separated so operations can be checked before system changes are applied.
+
+User configuration is parsed as data and is never sourced as arbitrary shell code.
+
+Only explicitly supported settings may be overridden.
+
+Invalid, duplicate, or unsupported configuration values fail clearly.
+
+CLI selections retain higher precedence than user configuration.
+
+Machine-specific configuration remains outside repository-managed defaults.
 
 Dry-run mode provides a way to preview execution without applying changes.
 
@@ -1015,7 +1312,7 @@ Temporary external installation files are staged predictably and cleaned after e
 
 Profiles do not contain package-manager commands or duplicate module implementation.
 
-Loading a distro adapter, capability mapping, external installer definition, module, or profile does not itself change the workstation.
+Loading configuration, a distro adapter, capability mapping, external installer definition, module, or profile does not itself change the workstation.
 
 Artifact integrity and external installer verification are separate concerns that build on the external installation framework.
 
