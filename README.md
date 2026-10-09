@@ -583,7 +583,7 @@ linux-workstation-bootstrap/
 └── README.md
 ```
 
-Concrete workstation modules and profiles are added independently from their shared frameworks.
+Concrete workstation modules and profiles are added independently of their shared frameworks.
 
 ## Safety
 
