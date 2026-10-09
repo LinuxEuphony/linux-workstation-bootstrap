@@ -22,14 +22,12 @@ load_distro_adapter() {
     local profile="${1:-}"
     local adapter_path
 
-    # A distribution profile must be selected before an adapter can be loaded.
     if [[ -z "$profile" ]]; then
         printf 'Error: no distribution profile was provided.\n' >&2
         log_error "Distribution adapter load requested without a profile."
         return 2
     fi
 
-    # Only configured supported profiles may load distribution adapters.
     if ! is_supported_distro "$profile"; then
         printf 'Error: unsupported distribution profile: %s\n' \
             "$profile" >&2
@@ -42,7 +40,6 @@ load_distro_adapter() {
 
     adapter_path="$LWBS_ROOT/distros/$profile.sh"
 
-    # A supported profile must have a corresponding readable adapter.
     if [[ ! -r "$adapter_path" ]]; then
         printf 'Error: distribution adapter not found: %s\n' \
             "$adapter_path" >&2
@@ -53,8 +50,6 @@ load_distro_adapter() {
         return 1
     fi
 
-    # Remove any previously loaded contract functions before sourcing another
-    # adapter so validation cannot succeed using stale functions.
     reset_distro_adapter_contract
 
     log_info "Loading distribution adapter: $profile"
@@ -71,7 +66,6 @@ load_distro_adapter() {
         return 1
     fi
 
-    # Reject adapters that do not implement the required interface.
     if ! validate_distro_adapter; then
         log_error \
             "Distribution adapter validation failed: profile=$profile"
@@ -91,10 +85,12 @@ load_distro_adapter() {
 # Validate the interface required from every distribution adapter.
 validate_distro_adapter() {
     local required_function
+
     local -a required_functions=(
         "distro_validate_environment"
         "distro_update_package_index"
         "distro_install_packages"
+        "distro_install_local_package"
     )
 
     for required_function in "${required_functions[@]}"; do
@@ -115,6 +111,7 @@ reset_distro_adapter_contract() {
         distro_validate_environment \
         distro_update_package_index \
         distro_install_packages \
+        distro_install_local_package \
         2>/dev/null || true
 
     DISTRO_ADAPTER_PROFILE=""

@@ -16,9 +16,10 @@
 # 6. Determines the distribution profile to use.
 # 7. Loads and validates the selected distribution adapter.
 # 8. Loads package capability mappings for the selected distribution.
-# 9. Exposes the workstation module framework.
-# 10. Exposes the workstation profile framework.
-# 11. Controls the main bootstrap execution flow.
+# 9. Exposes the external software installation framework.
+# 10. Exposes the workstation module framework.
+# 11. Exposes the workstation profile framework.
+# 12. Controls the main bootstrap execution flow.
 
 # Load default application configuration.
 # shellcheck source=../config/defaults.sh
@@ -47,6 +48,10 @@ source "$LWBS_ROOT/lib/distro.sh"
 # Load package capability resolution utilities.
 # shellcheck source=./capability.sh
 source "$LWBS_ROOT/lib/capability.sh"
+
+# Load external software installation utilities.
+# shellcheck source=./external.sh
+source "$LWBS_ROOT/lib/external.sh"
 
 # Load workstation module utilities.
 # shellcheck source=./module.sh
@@ -180,7 +185,8 @@ bootstrap_main() {
         "Capability mapping ready: $LWBS_CAPABILITY_PROFILE"
 
     # Workstation profile selection is introduced separately from the profile
-    # framework itself. Loading the framework does not execute any modules.
+    # framework itself. Loading the shared frameworks does not execute modules
+    # or external installers.
     if "$LWBS_DRY_RUN"; then
         printf '\nDry-run mode enabled. No system changes will be applied.\n'
     fi
