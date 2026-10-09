@@ -18,7 +18,8 @@
 # 8. Routes missing packages through the selected distro adapter.
 # 9. Executes declared external installers through the shared framework.
 # 10. Supports optional module-specific operations.
-# 11. Preserves dry-run behaviour through shared execution utilities.
+# 11. Supports optional module-level post-install verification.
+# 12. Preserves dry-run behaviour through shared execution utilities.
 
 LWBS_MODULE_ID=""
 LWBS_MODULE_NAME=""
@@ -106,9 +107,6 @@ load_module() {
         printf 'Error: module ID mismatch: requested %s, module declared %s\n' \
             "$requested_module" \
             "$LWBS_MODULE_ID" >&2
-
-        log_error \
-            "Module ID mismatch: requested=$requested_module declared=$LWBS_MODULE_ID"
 
         reset_module_contract
         return 1
@@ -198,7 +196,8 @@ load_module() {
 
     if ((${#LWBS_MODULE_CAPABILITIES[@]} == 0 &&
         ${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} == 0)) &&
-        ! declare -F module_apply >/dev/null 2>&1; then
+        ! declare -F module_apply >/dev/null 2>&1 &&
+        ! declare -F module_verify >/dev/null 2>&1; then
 
         printf 'Error: module %s does not declare any actions.\n' \
             "$requested_module" >&2
@@ -279,17 +278,10 @@ collect_missing_module_packages() {
         case "$package_state" in
             installed)
                 printf '    - %s [installed, skip]\n' "$package"
-
-                log_info \
-                    "Package requirement already satisfied: module=$LWBS_MODULE_ID package=$package"
                 ;;
 
             absent)
                 printf '    - %s [missing]\n' "$package"
-
-                log_info \
-                    "Package requirement not satisfied: module=$LWBS_MODULE_ID package=$package"
-
                 output_array_ref+=("$package")
                 ;;
 
@@ -307,10 +299,8 @@ collect_missing_module_packages() {
 }
 
 execute_loaded_module() {
-    local capability
     local installer_id
     local exit_code
-    local package
 
     local -a resolved_packages=()
     local -a missing_packages=()
@@ -332,108 +322,41 @@ execute_loaded_module() {
         return 1
     fi
 
-    if [[ "$LWBS_CAPABILITY_PROFILE" != "$DISTRO_ADAPTER_PROFILE" ]]; then
-        printf 'Error: capability mapping profile "%s" does not match distribution adapter "%s".\n' \
-            "$LWBS_CAPABILITY_PROFILE" \
-            "$DISTRO_ADAPTER_PROFILE" >&2
-        return 1
-    fi
-
-    printf '\nModule: %s\n' "$LWBS_MODULE_NAME"
-    printf '  ID          : %s\n' "$LWBS_MODULE_ID"
-    printf '  Description : %s\n' "$LWBS_MODULE_DESCRIPTION"
-
-    log_info \
-        "Executing module: id=$LWBS_MODULE_ID name=$LWBS_MODULE_NAME"
-
     if ((${#LWBS_MODULE_CAPABILITIES[@]} > 0)); then
-        printf '  Capabilities: %d\n' "${#LWBS_MODULE_CAPABILITIES[@]}"
-
-        for capability in "${LWBS_MODULE_CAPABILITIES[@]}"; do
-            printf '    - %s\n' "$capability"
-        done
-
         if resolve_capabilities \
             resolved_packages \
             "${LWBS_MODULE_CAPABILITIES[@]}"; then
             :
         else
-            exit_code=$?
-            return "$exit_code"
+            return $?
         fi
-
-        if ((${#resolved_packages[@]} == 0)); then
-            printf 'Error: module capabilities resolved to no packages: %s\n' \
-                "$LWBS_MODULE_ID" >&2
-            return 1
-        fi
-
-        printf '  Package state:\n'
 
         if collect_missing_module_packages \
             missing_packages \
             "${resolved_packages[@]}"; then
             :
         else
+            return $?
+        fi
+
+        if ((${#missing_packages[@]} > 0)); then
+            distro_install_packages "${missing_packages[@]}"
+        fi
+    fi
+
+    for installer_id in "${LWBS_MODULE_EXTERNAL_INSTALLERS[@]}"; do
+        if run_external_installer "$installer_id"; then
+            reset_external_installer_contract
+        else
             exit_code=$?
+            reset_external_installer_contract
             return "$exit_code"
         fi
-
-        if ((${#missing_packages[@]} == 0)); then
-            printf '  Action      : package requirements already satisfied\n'
-
-            log_info \
-                "Module package installation skipped because all requirements are satisfied: $LWBS_MODULE_ID"
-        else
-            printf '  Install     : %d package(s)\n' \
-                "${#missing_packages[@]}"
-
-            for package in "${missing_packages[@]}"; do
-                printf '    - %s\n' "$package"
-            done
-
-            if distro_install_packages "${missing_packages[@]}"; then
-                :
-            else
-                exit_code=$?
-                return "$exit_code"
-            fi
-        fi
-    fi
-
-    if ((${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} > 0)); then
-        printf '  External software: %d\n' \
-            "${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]}"
-
-        for installer_id in "${LWBS_MODULE_EXTERNAL_INSTALLERS[@]}"; do
-            printf '    - %s\n' "$installer_id"
-
-            if run_external_installer "$installer_id"; then
-                reset_external_installer_contract
-            else
-                exit_code=$?
-                reset_external_installer_contract
-                return "$exit_code"
-            fi
-        done
-    fi
+    done
 
     if declare -F module_apply >/dev/null 2>&1; then
-        log_info \
-            "Executing module operation hook: $LWBS_MODULE_ID"
-
-        if module_apply; then
-            :
-        else
-            exit_code=$?
-            return "$exit_code"
-        fi
+        module_apply
     fi
-
-    log_info \
-        "Module completed successfully: $LWBS_MODULE_ID"
-
-    return 0
 }
 
 run_module() {
@@ -458,6 +381,7 @@ reset_module_contract() {
         module_capabilities \
         module_external_installers \
         module_apply \
+        module_verify \
         2>/dev/null || true
 
     LWBS_MODULE_ID=""

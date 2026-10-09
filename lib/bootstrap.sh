@@ -6,22 +6,8 @@
 # Main application bootstrap.
 # Coordinates the shared bootstrap layers without embedding distribution-
 # specific installation logic in the application entry flow.
-#
-# This file:
-# 1. Loads application configuration and shared components.
-# 2. Processes command-line arguments.
-# 3. Initializes application logging.
-# 4. Loads optional user configuration.
-# 5. Validates the runtime environment.
-# 6. Coordinates system detection.
-# 7. Determines the distribution profile to use.
-# 8. Loads and validates the selected distribution adapter.
-# 9. Loads package capability mappings for the selected distribution.
-# 10. Exposes external software installation.
-# 11. Exposes workstation modules and profiles.
-# 12. Exposes resolved execution planning and confirmation.
-# 13. Controls the main bootstrap execution flow.
 
+# shellcheck source=../config/defaults.sh
 source "$LWBS_ROOT/config/defaults.sh"
 
 # shellcheck source=./config.sh
@@ -59,6 +45,9 @@ source "$LWBS_ROOT/lib/detect.sh"
 
 # shellcheck source=./ui.sh
 source "$LWBS_ROOT/lib/ui.sh"
+
+# shellcheck source=./verification.sh
+source "$LWBS_ROOT/lib/verification.sh"
 
 # shellcheck source=./plan.sh
 source "$LWBS_ROOT/lib/plan.sh"
@@ -138,38 +127,20 @@ bootstrap_main() {
     fi
 
     if ! load_distro_adapter "$SELECTED_DISTRO_PROFILE"; then
-        log_error \
-            "Unable to load distribution adapter: $SELECTED_DISTRO_PROFILE"
-
         show_failure_info
         return 1
     fi
 
     if ! distro_validate_environment; then
-        log_error \
-            "Distribution adapter environment validation failed: $SELECTED_DISTRO_PROFILE"
-
         show_failure_info
         return 1
     fi
-
-    log_info \
-        "Distribution adapter ready: $DISTRO_ADAPTER_PROFILE"
 
     if ! load_capability_map "$SELECTED_DISTRO_PROFILE"; then
-        log_error \
-            "Unable to load capability mapping: $SELECTED_DISTRO_PROFILE"
-
         show_failure_info
         return 1
     fi
 
-    log_info \
-        "Capability mapping ready: $LWBS_CAPABILITY_PROFILE"
-
-    # Workstation profile selection is added separately. Once a workstation
-    # profile is selected, run_profile() routes it through the mandatory
-    # execution-plan workflow before any installation is attempted.
     if "$LWBS_DRY_RUN"; then
         printf '\nDry-run mode enabled. No system changes will be applied.\n'
     fi
@@ -189,10 +160,6 @@ select_distro_profile() {
         fi
 
         SELECTED_DISTRO_PROFILE="$LWBS_REQUESTED_DISTRO_PROFILE"
-
-        log_info \
-            "Distribution profile selected from CLI: $SELECTED_DISTRO_PROFILE"
-
         return 0
     fi
 
@@ -200,10 +167,6 @@ select_distro_profile() {
         "$LWBS_CONFIG_DISTRO_PROFILE" != "auto" ]]; then
 
         SELECTED_DISTRO_PROFILE="$LWBS_CONFIG_DISTRO_PROFILE"
-
-        log_info \
-            "Distribution profile selected from user configuration: $SELECTED_DISTRO_PROFILE"
-
         return 0
     fi
 
@@ -216,8 +179,6 @@ select_distro_profile() {
         printf 'Error: detected distribution "%s" is not currently supported.\n' \
             "$SYSTEM_DISTRO_ID" >&2
 
-        printf 'Specify a supported profile using --distro.\n' >&2
-
         return 1
     fi
 
@@ -228,9 +189,5 @@ select_distro_profile() {
         return 0
     fi
 
-    if ! choose_distro_profile; then
-        return 1
-    fi
-
-    return 0
+    choose_distro_profile
 }
