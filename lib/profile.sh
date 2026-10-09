@@ -4,18 +4,13 @@
 # Author: David Kariuki
 #
 # Workstation profile utilities.
-# Provides the controlled interface used to load, validate, and execute
-# declarative workstation profiles.
+# Provides the controlled interface used to load and validate declarative
+# workstation profiles.
 #
-# This file:
-# 1. Loads workstation profiles from the profiles directory.
-# 2. Validates the profile contract.
-# 3. Captures profile metadata and selected modules.
-# 4. Validates referenced modules before profile execution.
-# 5. Executes profile modules through the shared module framework.
-# 6. Preserves dry-run behaviour through module and distro execution layers.
+# Profile execution is delegated to the execution-plan framework so all
+# package, external software, and custom module actions are resolved before
+# any system-changing operation begins.
 
-# State for the profile currently loaded by the bootstrap.
 LWBS_PROFILE_ID=""
 LWBS_PROFILE_NAME=""
 LWBS_PROFILE_DESCRIPTION=""
@@ -23,7 +18,6 @@ LWBS_PROFILE_PATH=""
 
 declare -a LWBS_PROFILE_MODULES=()
 
-# Load a workstation profile by ID.
 load_profile() {
     local requested_profile="${1:-}"
     local profile_directory
@@ -37,13 +31,9 @@ load_profile() {
         return 2
     fi
 
-    # Restrict profile IDs to predictable file-safe identifiers.
     if [[ ! "$requested_profile" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
         printf 'Error: invalid profile ID: %s\n' \
             "$requested_profile" >&2
-
-        log_error \
-            "Invalid profile ID requested: $requested_profile"
 
         return 2
     fi
@@ -55,14 +45,9 @@ load_profile() {
         printf 'Error: profile not found: %s\n' \
             "$profile_path" >&2
 
-        log_error \
-            "Profile file not found: profile=$requested_profile path=$profile_path"
-
         return 1
     fi
 
-    # Remove the previous profile contract before loading another profile so
-    # stale functions cannot make an incomplete profile appear valid.
     reset_profile_contract
 
     log_info "Loading profile: $requested_profile"
@@ -72,29 +57,21 @@ load_profile() {
         printf 'Error: failed to load profile: %s\n' \
             "$requested_profile" >&2
 
-        log_error \
-            "Profile source failed: profile=$requested_profile path=$profile_path"
-
         reset_profile_contract
         return 1
     fi
 
     if ! validate_profile_contract; then
-        log_error \
-            "Profile contract validation failed: $requested_profile"
-
         reset_profile_contract
         return 1
     fi
 
-    # Read profile metadata only after the contract has been validated.
     LWBS_PROFILE_ID="$(profile_id)"
     LWBS_PROFILE_NAME="$(profile_name)"
     LWBS_PROFILE_DESCRIPTION="$(profile_description)"
 
     if [[ -z "$LWBS_PROFILE_ID" ]]; then
         printf 'Error: profile returned an empty profile ID.\n' >&2
-        log_error "Profile returned an empty ID: $requested_profile"
         reset_profile_contract
         return 1
     fi
@@ -104,9 +81,6 @@ load_profile() {
             "$requested_profile" \
             "$LWBS_PROFILE_ID" >&2
 
-        log_error \
-            "Profile ID mismatch: requested=$requested_profile declared=$LWBS_PROFILE_ID"
-
         reset_profile_contract
         return 1
     fi
@@ -114,9 +88,6 @@ load_profile() {
     if [[ -z "$LWBS_PROFILE_NAME" ]]; then
         printf 'Error: profile returned an empty display name: %s\n' \
             "$requested_profile" >&2
-
-        log_error \
-            "Profile returned an empty display name: $requested_profile"
 
         reset_profile_contract
         return 1
@@ -126,20 +97,15 @@ load_profile() {
         printf 'Error: profile returned an empty description: %s\n' \
             "$requested_profile" >&2
 
-        log_error \
-            "Profile returned an empty description: $requested_profile"
-
         reset_profile_contract
         return 1
     fi
 
-    # Collect module selections as one module ID per line.
-    if ! module_output="$(profile_modules)"; then
+    if module_output="$(profile_modules)"; then
+        :
+    else
         printf 'Error: unable to read module selections for profile: %s\n' \
             "$requested_profile" >&2
-
-        log_error \
-            "Profile module resolution failed: $requested_profile"
 
         reset_profile_contract
         return 1
@@ -148,17 +114,12 @@ load_profile() {
     LWBS_PROFILE_MODULES=()
 
     while IFS= read -r module_id; do
-        if [[ -z "$module_id" ]]; then
-            continue
-        fi
+        [[ -z "$module_id" ]] && continue
 
         if [[ ! "$module_id" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
             printf 'Error: invalid module ID in profile %s: %s\n' \
                 "$requested_profile" \
                 "$module_id" >&2
-
-            log_error \
-                "Invalid profile module declaration: profile=$requested_profile module=$module_id"
 
             reset_profile_contract
             return 1
@@ -171,20 +132,13 @@ load_profile() {
         printf 'Error: profile %s does not select any modules.\n' \
             "$requested_profile" >&2
 
-        log_error \
-            "Profile contains no module selections: $requested_profile"
-
         reset_profile_contract
         return 1
     fi
 
     LWBS_PROFILE_PATH="$profile_path"
 
-    # Validate every referenced module before the profile is accepted.
     if ! validate_profile_modules; then
-        log_error \
-            "Profile module validation failed: $requested_profile"
-
         reset_profile_contract
         return 1
     fi
@@ -195,7 +149,6 @@ load_profile() {
     return 0
 }
 
-# Validate the interface required from every workstation profile.
 validate_profile_contract() {
     local required_function
 
@@ -218,99 +171,57 @@ validate_profile_contract() {
     return 0
 }
 
-# Validate every module referenced by the currently loaded profile.
 validate_profile_modules() {
     local module_id
+    local exit_code
 
     for module_id in "${LWBS_PROFILE_MODULES[@]}"; do
-        if ! load_module "$module_id"; then
+        if load_module "$module_id"; then
+            :
+        else
+            exit_code=$?
+
             printf 'Error: profile %s references an invalid or unavailable module: %s\n' \
                 "$LWBS_PROFILE_ID" \
                 "$module_id" >&2
 
-            log_error \
-                "Profile references invalid module: profile=$LWBS_PROFILE_ID module=$module_id"
-
             reset_module_contract
-            return 1
+            return "$exit_code"
         fi
 
-        # Module validation should not leave one of the profile modules loaded.
         reset_module_contract
     done
 
     return 0
 }
 
-# Execute the profile currently loaded by load_profile().
+# Execute the currently loaded profile through the mandatory planning layer.
 execute_loaded_profile() {
-    local module_id
-    local exit_code
-
     if [[ -z "$LWBS_PROFILE_ID" ]]; then
         printf 'Error: no profile is currently loaded.\n' >&2
-        log_error "Profile execution requested without a loaded profile."
         return 2
     fi
 
-    if [[ -z "${DISTRO_ADAPTER_PROFILE:-}" ]]; then
-        printf 'Error: a distribution adapter must be loaded before executing profiles.\n' \
-            >&2
-
-        log_error \
-            "Profile execution requested without a distribution adapter: profile=$LWBS_PROFILE_ID"
-
+    if ! declare -F run_profile_execution_plan >/dev/null 2>&1; then
+        printf 'Error: execution-plan framework is unavailable.\n' >&2
         return 1
     fi
 
-    printf '\nProfile: %s\n' "$LWBS_PROFILE_NAME"
-    printf '  ID          : %s\n' "$LWBS_PROFILE_ID"
-    printf '  Description : %s\n' "$LWBS_PROFILE_DESCRIPTION"
-    printf '  Modules     : %d\n' "${#LWBS_PROFILE_MODULES[@]}"
-
-    for module_id in "${LWBS_PROFILE_MODULES[@]}"; do
-        printf '    - %s\n' "$module_id"
-    done
-
-    log_info \
-        "Executing profile: id=$LWBS_PROFILE_ID name=$LWBS_PROFILE_NAME module_count=${#LWBS_PROFILE_MODULES[@]}"
-
-    # Execute modules in the order declared by the profile.
-    for module_id in "${LWBS_PROFILE_MODULES[@]}"; do
-        if run_module "$module_id"; then
-            continue
-        else
-            exit_code=$?
-
-            log_error \
-                "Profile module execution failed: profile=$LWBS_PROFILE_ID module=$module_id exit_code=$exit_code"
-
-            return "$exit_code"
-        fi
-    done
-
-    log_info \
-        "Profile completed successfully: $LWBS_PROFILE_ID"
-
-    return 0
+    run_profile_execution_plan "$LWBS_PROFILE_ID"
 }
 
-# Load and execute a workstation profile through the controlled profile path.
+# Load and execute a profile through the mandatory execution-plan workflow.
 run_profile() {
     local profile_id="${1:-}"
-    local exit_code
 
-    if load_profile "$profile_id"; then
-        :
-    else
-        exit_code=$?
-        return "$exit_code"
+    if ! declare -F run_profile_execution_plan >/dev/null 2>&1; then
+        printf 'Error: execution-plan framework is unavailable.\n' >&2
+        return 1
     fi
 
-    execute_loaded_profile
+    run_profile_execution_plan "$profile_id"
 }
 
-# Remove functions and state belonging to the current profile contract.
 reset_profile_contract() {
     unset -f \
         profile_id \

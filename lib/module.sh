@@ -11,12 +11,14 @@
 # 1. Loads workstation modules from the modules directory.
 # 2. Validates the module contract.
 # 3. Captures module metadata and capability requirements.
-# 4. Resolves capabilities through the selected distro package mapping.
-# 5. Checks resolved package installation state through the distro adapter.
-# 6. Skips package requirements that are already satisfied.
-# 7. Routes missing packages through the selected distro adapter.
-# 8. Supports optional module-specific operations.
-# 9. Preserves dry-run behaviour through shared execution utilities.
+# 4. Captures declarative external software requirements.
+# 5. Resolves capabilities through the selected distro package mapping.
+# 6. Checks resolved package installation state through the distro adapter.
+# 7. Skips package requirements that are already satisfied.
+# 8. Routes missing packages through the selected distro adapter.
+# 9. Executes declared external installers through the shared framework.
+# 10. Supports optional module-specific operations.
+# 11. Preserves dry-run behaviour through shared execution utilities.
 
 LWBS_MODULE_ID=""
 LWBS_MODULE_NAME=""
@@ -24,13 +26,18 @@ LWBS_MODULE_DESCRIPTION=""
 LWBS_MODULE_PATH=""
 
 declare -a LWBS_MODULE_CAPABILITIES=()
+declare -a LWBS_MODULE_EXTERNAL_INSTALLERS=()
 
 load_module() {
     local requested_module="${1:-}"
     local module_directory
     local module_path
     local capability_output
+    local external_output
     local capability
+    local installer_id
+
+    local -A seen_external_installers=()
 
     if [[ -z "$requested_module" ]]; then
         printf 'Error: no module was provided.\n' >&2
@@ -91,7 +98,6 @@ load_module() {
 
     if [[ -z "$LWBS_MODULE_ID" ]]; then
         printf 'Error: module returned an empty module ID.\n' >&2
-        log_error "Module returned an empty ID: $requested_module"
         reset_module_contract
         return 1
     fi
@@ -112,9 +118,6 @@ load_module() {
         printf 'Error: module returned an empty display name: %s\n' \
             "$requested_module" >&2
 
-        log_error \
-            "Module returned an empty display name: $requested_module"
-
         reset_module_contract
         return 1
     fi
@@ -122,9 +125,6 @@ load_module() {
     if [[ -z "$LWBS_MODULE_DESCRIPTION" ]]; then
         printf 'Error: module returned an empty description: %s\n' \
             "$requested_module" >&2
-
-        log_error \
-            "Module returned an empty description: $requested_module"
 
         reset_module_contract
         return 1
@@ -136,9 +136,6 @@ load_module() {
         printf 'Error: unable to read capability requirements for module: %s\n' \
             "$requested_module" >&2
 
-        log_error \
-            "Module capability requirement resolution failed: $requested_module"
-
         reset_module_contract
         return 1
     fi
@@ -146,17 +143,12 @@ load_module() {
     LWBS_MODULE_CAPABILITIES=()
 
     while IFS= read -r capability; do
-        if [[ -z "$capability" ]]; then
-            continue
-        fi
+        [[ -z "$capability" ]] && continue
 
         if [[ ! "$capability" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
             printf 'Error: invalid capability declaration in module %s: %s\n' \
                 "$requested_module" \
                 "$capability" >&2
-
-            log_error \
-                "Invalid capability declaration: module=$requested_module capability=$capability"
 
             reset_module_contract
             return 1
@@ -165,13 +157,51 @@ load_module() {
         LWBS_MODULE_CAPABILITIES+=("$capability")
     done <<<"$capability_output"
 
-    if ((${#LWBS_MODULE_CAPABILITIES[@]} == 0)) &&
+    LWBS_MODULE_EXTERNAL_INSTALLERS=()
+
+    if declare -F module_external_installers >/dev/null 2>&1; then
+        if external_output="$(module_external_installers)"; then
+            :
+        else
+            printf 'Error: unable to read external installer requirements for module: %s\n' \
+                "$requested_module" >&2
+
+            reset_module_contract
+            return 1
+        fi
+
+        while IFS= read -r installer_id; do
+            [[ -z "$installer_id" ]] && continue
+
+            if [[ ! "$installer_id" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+                printf 'Error: invalid external installer ID in module %s: %s\n' \
+                    "$requested_module" \
+                    "$installer_id" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            if [[ -n "${seen_external_installers[$installer_id]+defined}" ]]; then
+                printf 'Error: duplicate external installer in module %s: %s\n' \
+                    "$requested_module" \
+                    "$installer_id" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            seen_external_installers["$installer_id"]=1
+            LWBS_MODULE_EXTERNAL_INSTALLERS+=("$installer_id")
+        done <<<"$external_output"
+    fi
+
+    if ((${#LWBS_MODULE_CAPABILITIES[@]} == 0 &&
+        ${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} == 0)) &&
         ! declare -F module_apply >/dev/null 2>&1; then
+
         printf 'Error: module %s does not declare any actions.\n' \
             "$requested_module" >&2
-
-        log_error \
-            "Module contains no capability requirements or operation hook: $requested_module"
 
         reset_module_contract
         return 1
@@ -180,7 +210,7 @@ load_module() {
     LWBS_MODULE_PATH="$module_path"
 
     log_info \
-        "Module loaded: id=$LWBS_MODULE_ID capability_count=${#LWBS_MODULE_CAPABILITIES[@]}"
+        "Module loaded: id=$LWBS_MODULE_ID capability_count=${#LWBS_MODULE_CAPABILITIES[@]} external_count=${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]}"
 
     return 0
 }
@@ -207,8 +237,6 @@ validate_module_contract() {
     return 0
 }
 
-# Separate resolved packages into requirements that are already satisfied and
-# packages that still require installation.
 collect_missing_module_packages() {
     local result_name="${1:-}"
     local package
@@ -229,8 +257,6 @@ collect_missing_module_packages() {
 
     shift
 
-    # Use a distinct local nameref name so a caller array named
-    # "missing_packages" cannot create a circular name reference.
     local -n output_array_ref="$result_name"
 
     output_array_ref=()
@@ -272,9 +298,6 @@ collect_missing_module_packages() {
                     "$package_state" \
                     "$package" >&2
 
-                log_error \
-                    "Invalid package state returned by distro adapter: module=$LWBS_MODULE_ID package=$package state=$package_state"
-
                 return 1
                 ;;
         esac
@@ -285,6 +308,7 @@ collect_missing_module_packages() {
 
 execute_loaded_module() {
     local capability
+    local installer_id
     local exit_code
     local package
 
@@ -293,27 +317,18 @@ execute_loaded_module() {
 
     if [[ -z "$LWBS_MODULE_ID" ]]; then
         printf 'Error: no module is currently loaded.\n' >&2
-        log_error "Module execution requested without a loaded module."
         return 2
     fi
 
     if [[ -z "${DISTRO_ADAPTER_PROFILE:-}" ]]; then
         printf 'Error: a distribution adapter must be loaded before executing modules.\n' \
             >&2
-
-        log_error \
-            "Module execution requested without a distribution adapter: module=$LWBS_MODULE_ID"
-
         return 1
     fi
 
     if [[ -z "${LWBS_CAPABILITY_PROFILE:-}" ]]; then
         printf 'Error: a capability mapping must be loaded before executing modules.\n' \
             >&2
-
-        log_error \
-            "Module execution requested without a capability mapping: module=$LWBS_MODULE_ID"
-
         return 1
     fi
 
@@ -321,22 +336,6 @@ execute_loaded_module() {
         printf 'Error: capability mapping profile "%s" does not match distribution adapter "%s".\n' \
             "$LWBS_CAPABILITY_PROFILE" \
             "$DISTRO_ADAPTER_PROFILE" >&2
-
-        log_error \
-            "Capability and distro profile mismatch: capability_profile=$LWBS_CAPABILITY_PROFILE adapter_profile=$DISTRO_ADAPTER_PROFILE module=$LWBS_MODULE_ID"
-
-        return 1
-    fi
-
-    if ! declare -F distro_install_packages >/dev/null 2>&1; then
-        printf 'Error: the loaded distribution adapter cannot install packages.\n' \
-            >&2
-        return 1
-    fi
-
-    if ! declare -F distro_package_state >/dev/null 2>&1; then
-        printf 'Error: the loaded distribution adapter cannot determine package state.\n' \
-            >&2
         return 1
     fi
 
@@ -360,17 +359,12 @@ execute_loaded_module() {
             :
         else
             exit_code=$?
-
-            log_error \
-                "Module capability resolution failed: module=$LWBS_MODULE_ID exit_code=$exit_code"
-
             return "$exit_code"
         fi
 
         if ((${#resolved_packages[@]} == 0)); then
             printf 'Error: module capabilities resolved to no packages: %s\n' \
                 "$LWBS_MODULE_ID" >&2
-
             return 1
         fi
 
@@ -398,28 +392,30 @@ execute_loaded_module() {
                 printf '    - %s\n' "$package"
             done
 
-            log_info \
-                "Installing missing module packages: module=$LWBS_MODULE_ID count=${#missing_packages[@]}"
-
             if distro_install_packages "${missing_packages[@]}"; then
                 :
             else
                 exit_code=$?
-
-                log_error \
-                    "Module package installation failed: module=$LWBS_MODULE_ID exit_code=$exit_code"
-
                 return "$exit_code"
             fi
-
-            if "$LWBS_DRY_RUN"; then
-                log_info \
-                    "Dry-run package installation completed: module=$LWBS_MODULE_ID count=${#missing_packages[@]}"
-            else
-                log_info \
-                    "Module package installation completed: module=$LWBS_MODULE_ID count=${#missing_packages[@]}"
-            fi
         fi
+    fi
+
+    if ((${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} > 0)); then
+        printf '  External software: %d\n' \
+            "${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]}"
+
+        for installer_id in "${LWBS_MODULE_EXTERNAL_INSTALLERS[@]}"; do
+            printf '    - %s\n' "$installer_id"
+
+            if run_external_installer "$installer_id"; then
+                reset_external_installer_contract
+            else
+                exit_code=$?
+                reset_external_installer_contract
+                return "$exit_code"
+            fi
+        done
     fi
 
     if declare -F module_apply >/dev/null 2>&1; then
@@ -430,10 +426,6 @@ execute_loaded_module() {
             :
         else
             exit_code=$?
-
-            log_error \
-                "Module operation failed: module=$LWBS_MODULE_ID exit_code=$exit_code"
-
             return "$exit_code"
         fi
     fi
@@ -464,6 +456,7 @@ reset_module_contract() {
         module_name \
         module_description \
         module_capabilities \
+        module_external_installers \
         module_apply \
         2>/dev/null || true
 
@@ -472,4 +465,5 @@ reset_module_contract() {
     LWBS_MODULE_DESCRIPTION=""
     LWBS_MODULE_PATH=""
     LWBS_MODULE_CAPABILITIES=()
+    LWBS_MODULE_EXTERNAL_INSTALLERS=()
 }
