@@ -12,11 +12,12 @@
 # 2. Validates the module contract.
 # 3. Captures module metadata and capability requirements.
 # 4. Resolves capabilities through the selected distro package mapping.
-# 5. Routes resolved packages through the selected distro adapter.
-# 6. Supports optional module-specific operations.
-# 7. Preserves dry-run behaviour through shared execution utilities.
+# 5. Checks resolved package installation state through the distro adapter.
+# 6. Skips package requirements that are already satisfied.
+# 7. Routes missing packages through the selected distro adapter.
+# 8. Supports optional module-specific operations.
+# 9. Preserves dry-run behaviour through shared execution utilities.
 
-# State for the module currently loaded by the bootstrap.
 LWBS_MODULE_ID=""
 LWBS_MODULE_NAME=""
 LWBS_MODULE_DESCRIPTION=""
@@ -24,7 +25,6 @@ LWBS_MODULE_PATH=""
 
 declare -a LWBS_MODULE_CAPABILITIES=()
 
-# Load a workstation module by ID.
 load_module() {
     local requested_module="${1:-}"
     local module_directory
@@ -38,7 +38,6 @@ load_module() {
         return 2
     fi
 
-    # Restrict module IDs to predictable file-safe identifiers.
     if [[ ! "$requested_module" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
         printf 'Error: invalid module ID: %s\n' \
             "$requested_module" >&2
@@ -62,8 +61,6 @@ load_module() {
         return 1
     fi
 
-    # Remove the previous module contract before loading another module so
-    # stale functions cannot make an incomplete module appear valid.
     reset_module_contract
 
     log_info "Loading module: $requested_module"
@@ -88,7 +85,6 @@ load_module() {
         return 1
     fi
 
-    # Read module metadata only after the contract has been validated.
     LWBS_MODULE_ID="$(module_id)"
     LWBS_MODULE_NAME="$(module_name)"
     LWBS_MODULE_DESCRIPTION="$(module_description)"
@@ -134,7 +130,6 @@ load_module() {
         return 1
     fi
 
-    # Collect portable capability requirements as one capability per line.
     if capability_output="$(module_capabilities)"; then
         :
     else
@@ -151,8 +146,6 @@ load_module() {
     LWBS_MODULE_CAPABILITIES=()
 
     while IFS= read -r capability; do
-        # Empty lines are ignored so modules implemented only through an
-        # operation hook remain possible.
         if [[ -z "$capability" ]]; then
             continue
         fi
@@ -172,7 +165,6 @@ load_module() {
         LWBS_MODULE_CAPABILITIES+=("$capability")
     done <<<"$capability_output"
 
-    # A module must provide at least one capability or a custom operation hook.
     if ((${#LWBS_MODULE_CAPABILITIES[@]} == 0)) &&
         ! declare -F module_apply >/dev/null 2>&1; then
         printf 'Error: module %s does not declare any actions.\n' \
@@ -193,7 +185,6 @@ load_module() {
     return 0
 }
 
-# Validate the interface required from every workstation module.
 validate_module_contract() {
     local required_function
 
@@ -216,13 +207,89 @@ validate_module_contract() {
     return 0
 }
 
-# Execute the module currently loaded by load_module().
+# Separate resolved packages into requirements that are already satisfied and
+# packages that still require installation.
+collect_missing_module_packages() {
+    local result_name="${1:-}"
+    local package
+    local package_state
+    local exit_code
+
+    if [[ -z "$result_name" ]]; then
+        printf 'Error: no output array was provided for package-state evaluation.\n' \
+            >&2
+        return 2
+    fi
+
+    if [[ ! "$result_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+        printf 'Error: invalid output array name for package-state evaluation: %s\n' \
+            "$result_name" >&2
+        return 2
+    fi
+
+    shift
+
+    # Use a distinct local nameref name so a caller array named
+    # "missing_packages" cannot create a circular name reference.
+    local -n output_array_ref="$result_name"
+
+    output_array_ref=()
+
+    for package in "$@"; do
+        if package_state="$(distro_package_state "$package")"; then
+            :
+        else
+            exit_code=$?
+
+            printf 'Error: unable to determine package state: %s\n' \
+                "$package" >&2
+
+            log_error \
+                "Package state check failed: module=$LWBS_MODULE_ID package=$package exit_code=$exit_code"
+
+            return "$exit_code"
+        fi
+
+        case "$package_state" in
+            installed)
+                printf '    - %s [installed, skip]\n' "$package"
+
+                log_info \
+                    "Package requirement already satisfied: module=$LWBS_MODULE_ID package=$package"
+                ;;
+
+            absent)
+                printf '    - %s [missing]\n' "$package"
+
+                log_info \
+                    "Package requirement not satisfied: module=$LWBS_MODULE_ID package=$package"
+
+                output_array_ref+=("$package")
+                ;;
+
+            *)
+                printf 'Error: distribution adapter returned invalid package state "%s" for %s.\n' \
+                    "$package_state" \
+                    "$package" >&2
+
+                log_error \
+                    "Invalid package state returned by distro adapter: module=$LWBS_MODULE_ID package=$package state=$package_state"
+
+                return 1
+                ;;
+        esac
+    done
+
+    return 0
+}
+
 execute_loaded_module() {
     local capability
     local exit_code
     local package
 
     local -a resolved_packages=()
+    local -a missing_packages=()
 
     if [[ -z "$LWBS_MODULE_ID" ]]; then
         printf 'Error: no module is currently loaded.\n' >&2
@@ -250,7 +317,6 @@ execute_loaded_module() {
         return 1
     fi
 
-    # Package resolution and package execution must use the same distro profile.
     if [[ "$LWBS_CAPABILITY_PROFILE" != "$DISTRO_ADAPTER_PROFILE" ]]; then
         printf 'Error: capability mapping profile "%s" does not match distribution adapter "%s".\n' \
             "$LWBS_CAPABILITY_PROFILE" \
@@ -265,10 +331,12 @@ execute_loaded_module() {
     if ! declare -F distro_install_packages >/dev/null 2>&1; then
         printf 'Error: the loaded distribution adapter cannot install packages.\n' \
             >&2
+        return 1
+    fi
 
-        log_error \
-            "Loaded distribution adapter is missing distro_install_packages."
-
+    if ! declare -F distro_package_state >/dev/null 2>&1; then
+        printf 'Error: the loaded distribution adapter cannot determine package state.\n' \
+            >&2
         return 1
     fi
 
@@ -303,36 +371,57 @@ execute_loaded_module() {
             printf 'Error: module capabilities resolved to no packages: %s\n' \
                 "$LWBS_MODULE_ID" >&2
 
-            log_error \
-                "Module capability resolution produced no packages: module=$LWBS_MODULE_ID"
-
             return 1
         fi
 
-        printf '  Packages    : %d\n' "${#resolved_packages[@]}"
+        printf '  Package state:\n'
 
-        for package in "${resolved_packages[@]}"; do
-            printf '    - %s\n' "$package"
-        done
-
-        log_info \
-            "Installing resolved module packages: module=$LWBS_MODULE_ID count=${#resolved_packages[@]}"
-
-        if distro_install_packages "${resolved_packages[@]}"; then
+        if collect_missing_module_packages \
+            missing_packages \
+            "${resolved_packages[@]}"; then
             :
         else
             exit_code=$?
-
-            log_error \
-                "Module package installation failed: module=$LWBS_MODULE_ID exit_code=$exit_code"
-
             return "$exit_code"
+        fi
+
+        if ((${#missing_packages[@]} == 0)); then
+            printf '  Action      : package requirements already satisfied\n'
+
+            log_info \
+                "Module package installation skipped because all requirements are satisfied: $LWBS_MODULE_ID"
+        else
+            printf '  Install     : %d package(s)\n' \
+                "${#missing_packages[@]}"
+
+            for package in "${missing_packages[@]}"; do
+                printf '    - %s\n' "$package"
+            done
+
+            log_info \
+                "Installing missing module packages: module=$LWBS_MODULE_ID count=${#missing_packages[@]}"
+
+            if distro_install_packages "${missing_packages[@]}"; then
+                :
+            else
+                exit_code=$?
+
+                log_error \
+                    "Module package installation failed: module=$LWBS_MODULE_ID exit_code=$exit_code"
+
+                return "$exit_code"
+            fi
+
+            if "$LWBS_DRY_RUN"; then
+                log_info \
+                    "Dry-run package installation completed: module=$LWBS_MODULE_ID count=${#missing_packages[@]}"
+            else
+                log_info \
+                    "Module package installation completed: module=$LWBS_MODULE_ID count=${#missing_packages[@]}"
+            fi
         fi
     fi
 
-    # Modules may provide additional operations that are not package
-    # installation. Those operations must use shared execution/configuration
-    # facilities so dry-run and safety guarantees remain intact.
     if declare -F module_apply >/dev/null 2>&1; then
         log_info \
             "Executing module operation hook: $LWBS_MODULE_ID"
@@ -355,7 +444,6 @@ execute_loaded_module() {
     return 0
 }
 
-# Load and execute a workstation module through the controlled module path.
 run_module() {
     local module_id="${1:-}"
     local exit_code
@@ -370,7 +458,6 @@ run_module() {
     execute_loaded_module
 }
 
-# Remove functions and state belonging to the current module contract.
 reset_module_contract() {
     unset -f \
         module_id \
