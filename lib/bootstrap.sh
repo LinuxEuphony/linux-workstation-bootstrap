@@ -15,9 +15,10 @@
 # 5. Coordinates system detection.
 # 6. Determines the distribution profile to use.
 # 7. Loads and validates the selected distribution adapter.
-# 8. Exposes the workstation module framework.
-# 9. Exposes the workstation profile framework.
-# 10. Controls the main bootstrap execution flow.
+# 8. Loads package capability mappings for the selected distribution.
+# 9. Exposes the workstation module framework.
+# 10. Exposes the workstation profile framework.
+# 11. Controls the main bootstrap execution flow.
 
 # Load default application configuration.
 # shellcheck source=../config/defaults.sh
@@ -42,6 +43,10 @@ source "$LWBS_ROOT/lib/execution.sh"
 # Load distribution adapter utilities.
 # shellcheck source=./distro.sh
 source "$LWBS_ROOT/lib/distro.sh"
+
+# Load package capability resolution utilities.
+# shellcheck source=./capability.sh
+source "$LWBS_ROOT/lib/capability.sh"
 
 # Load workstation module utilities.
 # shellcheck source=./module.sh
@@ -160,6 +165,19 @@ bootstrap_main() {
 
     log_info \
         "Distribution adapter ready: $DISTRO_ADAPTER_PROFILE"
+
+    # Load package mappings independently from the distro adapter so shared
+    # modules can express capabilities without embedding package names.
+    if ! load_capability_map "$SELECTED_DISTRO_PROFILE"; then
+        log_error \
+            "Unable to load capability mapping: $SELECTED_DISTRO_PROFILE"
+
+        show_failure_info
+        return 1
+    fi
+
+    log_info \
+        "Capability mapping ready: $LWBS_CAPABILITY_PROFILE"
 
     # Workstation profile selection is introduced separately from the profile
     # framework itself. Loading the framework does not execute any modules.
