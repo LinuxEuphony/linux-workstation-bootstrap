@@ -146,3 +146,4 @@ jobs:
 
       - name: Run bootstrap test suite
         run: bash tests/run.sh
+
