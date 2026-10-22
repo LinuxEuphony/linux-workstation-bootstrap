@@ -194,10 +194,10 @@ load_module() {
         done <<<"$external_output"
     fi
 
-    if ((${#LWBS_MODULE_CAPABILITIES[@]} == 0 &&
+    if ((${#LWBS_MODULE_CAPABILITIES[@]} == 0 && \
         ${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} == 0)) &&
-        ! declare -F module_apply >/dev/null 2>&1 &&
-        ! declare -F module_verify >/dev/null 2>&1; then
+            ! declare -F module_apply >/dev/null 2>&1 &&
+            ! declare -F module_verify >/dev/null 2>&1; then
 
         printf 'Error: module %s does not declare any actions.\n' \
             "$requested_module" >&2
