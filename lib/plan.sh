@@ -308,8 +308,8 @@ show_execution_plan() {
 }
 
 execution_plan_has_changes() {
-    ((LWBS_PLAN_INSTALL_ACTION_COUNT > 0 ||
-        LWBS_PLAN_CUSTOM_ACTION_COUNT > 0))
+    ((LWBS_PLAN_INSTALL_ACTION_COUNT > 0 || \
+    LWBS_PLAN_CUSTOM_ACTION_COUNT > 0))
 }
 
 execute_planned_packages() {

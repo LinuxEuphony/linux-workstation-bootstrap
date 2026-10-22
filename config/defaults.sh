@@ -32,9 +32,9 @@ declare -ar LWBS_SUPPORTED_DISTROS=(
 
 # Human-readable names for supported distribution profiles.
 declare -Ar LWBS_DISTRO_DISPLAY_NAMES=(
-    [ubuntu]="Ubuntu"
-    [debian]="Debian"
-    [kali]="Kali Linux"
+    ["ubuntu"]="Ubuntu"
+    ["debian"]="Debian"
+    ["kali"]="Kali Linux"
 )
 
 # Default distribution selection behaviour.
@@ -53,46 +53,46 @@ readonly LWBS_CONFIG_FILE_NAME="config.conf"
 # Additional distributions may be detected even when they do not yet
 # have an installation profile supported by the application.
 declare -Ar LWBS_DISTRO_FAMILIES=(
-    [ubuntu]="debian"
-    [debian]="debian"
-    [kali]="debian"
-    [linuxmint]="debian"
-    [pop]="debian"
-    [elementary]="debian"
+    ["ubuntu"]="debian"
+    ["debian"]="debian"
+    ["kali"]="debian"
+    ["linuxmint"]="debian"
+    ["pop"]="debian"
+    ["elementary"]="debian"
 
-    [fedora]="rpm"
-    [rhel]="rpm"
-    [rocky]="rpm"
-    [almalinux]="rpm"
-    [centos]="rpm"
+    ["fedora"]="rpm"
+    ["rhel"]="rpm"
+    ["rocky"]="rpm"
+    ["almalinux"]="rpm"
+    ["centos"]="rpm"
 
-    [arch]="arch"
-    [manjaro]="arch"
-    [endeavouros]="arch"
+    ["arch"]="arch"
+    ["manjaro"]="arch"
+    ["endeavouros"]="arch"
 
-    [opensuse-leap]="suse"
-    [opensuse-tumbleweed]="suse"
-    [sles]="suse"
+    ["opensuse-leap"]="suse"
+    ["opensuse-tumbleweed"]="suse"
+    ["sles"]="suse"
 )
 
 # Default package manager for each distribution family.
 declare -Ar LWBS_FAMILY_PACKAGE_MANAGERS=(
-    [debian]="apt"
-    [rpm]="dnf"
-    [arch]="pacman"
-    [suse]="zypper"
+    ["debian"]="apt"
+    ["rpm"]="dnf"
+    ["arch"]="pacman"
+    ["suse"]="zypper"
 )
 
 # Normalize common architecture names used by Linux distributions.
 declare -Ar LWBS_ARCH_ALIASES=(
-    [x86_64]="amd64"
-    [aarch64]="arm64"
-    [arm64]="arm64"
-    [armv7l]="armhf"
-    [i386]="i386"
-    [i486]="i386"
-    [i586]="i386"
-    [i686]="i386"
+    ["x86_64"]="amd64"
+    ["aarch64"]="arm64"
+    ["arm64"]="arm64"
+    ["armv7l"]="armhf"
+    ["i386"]="i386"
+    ["i486"]="i386"
+    ["i586"]="i386"
+    ["i686"]="i386"
 )
 
 # Persistent logging configuration.

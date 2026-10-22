@@ -142,7 +142,7 @@ choose_distro_profile() {
         if [[ "$choice" =~ ^[0-9]+$ ]]; then
             selected_index=$((10#$choice - 1))
 
-            if ((selected_index >= 0 &&
+            if ((selected_index >= 0 && \
                 selected_index < ${#LWBS_SUPPORTED_DISTROS[@]})); then
 
                 SELECTED_DISTRO_PROFILE="${LWBS_SUPPORTED_DISTROS[$selected_index]}"

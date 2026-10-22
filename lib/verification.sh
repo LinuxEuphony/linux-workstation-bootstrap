@@ -61,8 +61,7 @@ record_execution_result() {
     fi
 
     case "$status" in
-        successful | skipped | failed | unverifiable)
-            ;;
+        successful | skipped | failed | unverifiable) ;;
         *)
             printf 'Error: invalid execution result status: %s\n' \
                 "$status" >&2
