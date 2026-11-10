@@ -1,70 +1,210 @@
 # Linux Workstation Bootstrap
 
-A reusable, distro-aware Linux workstation bootstrap utility for preparing and configuring Linux workstations in a consistent and controlled way.
+A modular, distro-aware Linux workstation bootstrap utility for configuring Linux workstations consistently and safely.
 
-Linux Workstation Bootstrap is a modular replacement for a monolithic workstation setup script. It separates host detection, portable software intent, distribution-specific package resolution, external software installation, installation-state detection, user configuration, command execution, installable capabilities, and workstation profiles so each concern can evolve independently.
+Linux Workstation Bootstrap replaces a monolithic workstation setup script with reusable modules, portable software capabilities, distribution-specific adapters, execution planning, verification, and automated validation.
 
-## Current Capabilities
+## Features
 
-The current bootstrap foundation provides:
+- Linux distribution, version, codename, and architecture detection
+- Ubuntu, Debian, and Kali Linux support
+- portable capability-to-package resolution
+- distro-specific package adapters
+- package installation-state detection
+- idempotent package installation
+- modular workstation capabilities
+- declarative workstation profiles
+- controlled external software installation
+- dry-run execution
+- execution planning and confirmation
+- post-install verification and execution summaries
+- user-local configuration
+- persistent execution logging
+- automated Bash tests
+- ShellCheck and shfmt validation
+- GitHub Actions CI
 
-* Linux distribution detection using `/etc/os-release`
-* Distribution version and codename detection
-* Architecture detection and normalization
-* Distribution-family identification
-* Package-manager identification
-* Interactive distribution profile confirmation and selection
-* Command-line distribution profile override
-* Optional user-local configuration
-* Deterministic configuration precedence
-* Validation of supported user configuration values
-* Dry-run execution mode
-* Persistent per-session logging
-* Centralized application configuration
-* Controlled command execution
-* Centralized privileged command execution
-* Distribution adapter loading and contract validation
-* Ubuntu package-management adapter
-* Debian package-management adapter
-* Kali Linux package-management adapter
-* Portable package capability resolution
-* Independent package mappings per distribution profile
-* Distribution-specific package-state detection
-* Idempotent package installation filtering
-* Controlled external software installer loading and validation
-* External software installed-state detection
-* Idempotent external software execution
-* Repository, local-package, archive, and script installation methods
-* Predictable temporary staging for external artifacts
-* HTTPS-only external artifact downloads
-* Local distribution package installation through distro adapters
-* Controlled workstation module loading and validation
-* Module capability requirement handling
-* Optional module operation hooks
-* Controlled workstation profile loading and validation
-* Declarative profile-to-module composition
-* Profile module validation before execution
-* Profile execution through the shared module framework
+## Supported Distributions
 
-Supported distribution profiles:
+| Distribution | Adapter | Package Mapping | Package State |
+| --- | --- | --- | --- |
+| Ubuntu | Yes | Yes | Yes |
+| Debian | Yes | Yes | Yes |
+| Kali Linux | Yes | Yes | Yes |
 
-* Ubuntu
-* Debian
-* Kali Linux
-
-Current distribution adapter status:
-
-| Distribution | Adapter | Package Mapping | Package State | Local Packages |
-| --- | --- | --- | --- | --- |
-| Ubuntu | Implemented | Implemented | Implemented | Implemented |
-| Debian | Implemented | Implemented | Implemented | Implemented |
-| Kali Linux | Implemented | Implemented | Implemented | Implemented |
+The architecture is designed to support additional Linux distributions without adding distro-specific logic to shared workstation modules.
 
 ## Architecture
 
-The project separates workstation intent from distro-specific implementation.
+The project separates workstation intent from operating-system implementation.
 
-Configuration is resolved using deterministic precedence:
+```text
+Workstation Profile
+        |
+        v
+      Modules
+        |
+        v
+Portable Capabilities
+        |
+        v
+Distro Package Mapping
+        |
+        v
+Package State Check
+        |
+   +----+----+
+   |         |
+  skip    install
+             |
+             v
+    Distribution Adapter
+             |
+             v
+      Execution Layer
+```
+
+The core responsibility boundaries are:
+
+```text
+Profiles             decide which modules are required
+Modules              describe workstation capabilities
+Capability mappings  translate capabilities into distro packages
+Distro adapters      perform operating-system-specific operations
+Execution layer      controls command execution and privileges
+Verification         confirms the resulting workstation state
+```
+
+Software that cannot be installed through normal distribution repositories uses the separate external installer framework.
+
+## Modules
+
+Modules represent reusable workstation capabilities and live under:
+
+```text
+modules/
+```
+
+Modules declare portable capabilities rather than package-manager commands or distro-specific package names.
+
+The first workstation module is:
+
+```text
+common-utilities
+```
+
+It currently provides:
+
+```text
+curl
+dos2unix
+nano
+sed
+wget
+xz
+```
+
+For Debian-family distributions, for example, the portable `xz` capability resolves to the `xz-utils` package.
+
+## Profiles
+
+Profiles compose modules into workstation configurations and live under:
+
+```text
+profiles/
+```
+
+A profile selects modules without duplicating their implementation.
+
+Conceptually:
+
+```text
+developer
+├── common-utilities
+├── development-tools
+├── containers
+└── database-tools
+```
+
+Profiles remain independent of the selected Linux distribution.
+
+## Installation State and Idempotency
+
+Package and external software state is checked before installation.
+
+```text
+installed      -> skip
+absent         -> install
+unknown/error  -> stop safely
+```
+
+Repeated runs therefore avoid reinstalling already-satisfied requirements.
+
+Dry-run performs the same read-only state resolution without applying changes.
+
+## Execution Planning
+
+Workstation changes are resolved before they are executed.
+
+```text
+Profile
+  |
+  v
+Modules
+  |
+  v
+Capabilities
+  |
+  v
+Current State
+  |
+  v
+Execution Plan
+  |
+  v
+Confirmation
+  |
+  v
+Execution
+  |
+  v
+Verification
+```
+
+The plan distinguishes between requirements that are already satisfied and those that require installation.
+
+## External Software
+
+Software requiring mechanisms outside normal distro repositories is handled through controlled installer definitions under:
+
+```text
+installers/
+```
+
+Supported installer methods include:
+
+- repository configuration
+- local distribution packages
+- archives
+- staged installer scripts
+
+External downloads require HTTPS, and remote scripts are not piped directly into a shell.
+
+## Configuration
+
+Repository defaults live in:
+
+```text
+config/defaults.sh
+```
+
+Optional user configuration normally lives at:
+
+```text
+~/.config/linux-workstation-bootstrap/config.conf
+```
+
+Configuration precedence is:
 
 ```text
 Repository Defaults
@@ -73,197 +213,16 @@ Repository Defaults
 User Configuration
         |
         v
-Command-Line Arguments
+CLI Arguments
 ```
 
-Standard repository software follows the capability path:
-
-```text
-Workstation Profile
-        |
-        v
-      Modules
-        |
-        | capabilities
-        v
-Capability Resolver
-        |
-        | distro package mapping
-        v
- Package State Check
-        |
-   +----+----+
-   |         |
-installed   absent
-   |         |
-   v         v
-  skip   Distribution Adapter
-                 |
-                 v
-          Execution Layer
-                 |
-                 v
-        System Package Manager
-```
-
-Software that cannot be installed exclusively from the standard distribution repositories follows a separate controlled path:
-
-```text
-      Modules
-        |
-        | external software requirement
-        v
-External Installer
-        |
-        v
- External State Check
-        |
-   +----+----+
-   |         |
-installed   absent
-   |         |
-   v         v
-  skip    Installation Method
-              |
-              +-- Repository
-              +-- Local Package
-              +-- Archive
-              `-- Installer Script
-                       |
-                       v
-              Shared Execution Layer
-```
-
-The application entry flow coordinates these layers:
-
-```text
-User
-  |
-  v
-bin/linux-workstation-bootstrap
-  |
-  v
-lib/bootstrap.sh
-  |
-  +-- Repository defaults
-  +-- CLI parsing
-  +-- Logging
-  +-- User configuration
-  +-- Runtime validation
-  +-- System detection
-  +-- Terminal UI
-  +-- Execution framework
-  +-- Distribution adapter framework
-  +-- Capability resolution
-  +-- External installation framework
-  +-- Module framework
-  `-- Profile framework
-```
-
-The key separation is:
-
-```text
-Repository defaults define built-in behaviour.
-User configuration provides safe local overrides.
-CLI arguments provide the highest-precedence runtime selections.
-Profiles decide which workstation capabilities are wanted.
-Modules declare portable software and operation requirements.
-Capability mappings translate portable intent into distro package names.
-Distribution adapters determine package state and perform package operations.
-External installers define controlled non-standard installation paths.
-State checks determine whether installation work is actually required.
-The execution layer controls how system commands are run.
-```
-
-This prevents workstation modules from becoming coupled to one Linux distribution, package manager, vendor-specific installation mechanism, package-state implementation, or machine-specific configuration.
-
-## Component Responsibilities
-
-### Entry Point
-
-`bin/linux-workstation-bootstrap` is the public executable.
-
-It enables safe Bash behavior, resolves the project root, loads the bootstrap orchestrator, and passes command-line arguments to `bootstrap_main`.
-
-### Configuration
-
-Repository-managed defaults live in:
-
-```text
-config/defaults.sh
-```
-
-They define built-in application values such as:
-
-* application identity and version
-* minimum Bash version
-* supported distribution profiles
-* distro-family mappings
-* package-manager mappings
-* architecture normalization
-* user configuration location
-* logging defaults
-
-Distribution-specific package mappings live separately under:
-
-```text
-config/packages/
-├── debian.sh
-├── kali.sh
-└── ubuntu.sh
-```
-
-User configuration is handled by:
-
-```text
-lib/config.sh
-```
-
-The normal user configuration path is:
-
-```text
-~/.config/linux-workstation-bootstrap/config.conf
-```
-
-If `XDG_CONFIG_HOME` is configured, it is used instead of `~/.config`.
-
-User configuration is optional. The bootstrap operates normally when the file does not exist.
-
-Configuration precedence is:
-
-```text
-repository defaults
-        |
-        v
-user configuration
-        |
-        v
-CLI arguments
-```
-
-CLI arguments therefore remain the highest-precedence runtime input.
-
-### User Configuration
-
-User configuration allows supported defaults to be changed without editing repository-managed files.
-
-The configuration file is parsed as data rather than sourced as shell code.
-
-A minimal example is:
+Example:
 
 ```ini
-# Linux Workstation Bootstrap
-
 distro_profile=ubuntu
 ```
 
-The currently supported setting is:
-
-```text
-distro_profile
-```
-
-Supported values are:
+Supported distro profile values are:
 
 ```text
 auto
@@ -272,860 +231,15 @@ debian
 kali
 ```
 
-`auto` preserves normal host detection and interactive selection behaviour.
+User configuration is parsed as data and is never sourced as arbitrary shell code.
 
-For example:
-
-```ini
-distro_profile=ubuntu
-```
-
-sets Ubuntu as the user's default distribution profile.
-
-However:
-
-```bash
-./bin/linux-workstation-bootstrap \
-  --distro debian \
-  --dry-run
-```
-
-still selects Debian because the CLI has higher precedence.
-
-Unsupported settings fail clearly rather than being silently ignored.
-
-For example:
-
-```ini
-magic_setting=true
-```
-
-is rejected.
-
-Duplicate settings are also rejected:
-
-```ini
-distro_profile=ubuntu
-distro_profile=debian
-```
-
-This prevents ambiguous configuration.
-
-The user configuration parser does not perform shell expansion, command substitution, or arbitrary code execution.
-
-Values such as:
-
-```text
-$(command)
-```
-
-are treated as configuration data and rejected when they are not valid for the setting.
-
-Internal constants that are not explicitly exposed as user settings remain controlled by repository configuration.
-
-### Bootstrap Orchestration
-
-`lib/bootstrap.sh` coordinates the application lifecycle.
-
-Its current startup order is:
-
-```text
-Parse CLI
-    |
-    v
-Handle help/version
-    |
-    v
-Initialize logging
-    |
-    v
-Load user configuration
-    |
-    v
-Validate runtime
-    |
-    v
-Detect system
-    |
-    v
-Resolve distribution profile
-    |
-    v
-Load distro adapter
-    |
-    v
-Load package capability mapping
-```
-
-The bootstrap orchestrator does not contain distro-specific package commands, external software implementations, or workstation module implementations.
-
-### CLI Handling
-
-`lib/arguments.sh` parses command-line options and records runtime selections such as:
-
-* dry-run mode
-* non-interactive confirmation
-* distribution-profile overrides
-* informational actions
-
-CLI selections remain separate from user configuration state.
-
-This makes precedence explicit rather than rewriting CLI state while configuration is loaded.
-
-### Core Utilities
-
-`lib/core.sh` contains reusable distro-independent runtime checks and helpers.
-
-### System Detection
-
-`lib/detect.sh` reads the host environment and determines:
-
-* distribution
-* version
-* codename
-* distro family
-* architecture
-* expected package manager
-
-Detected host information remains separate from the distribution profile selected for execution.
-
-### Logging
-
-`lib/logging.sh` provides persistent per-session application logging.
-
-Configuration loading and selection decisions are recorded without executing or blindly persisting arbitrary user-supplied shell content.
-
-Package and external-software state decisions are also recorded so skipped and required actions remain visible across repeated bootstrap runs.
-
-### Terminal UI
-
-`lib/ui.sh` owns human-facing output, prompts, menus, help, version information, and execution summaries.
-
-### Execution Framework
-
-`lib/execution.sh` centralizes:
-
-* normal command execution
-* privileged command execution
-* dry-run behavior
-* command result logging
-* exit-code propagation
-
-System-changing code should use the shared execution layer rather than executing privileged commands directly.
-
-### Distribution Adapter Framework
-
-`lib/distro.sh` loads and validates the selected distribution implementation.
-
-Concrete adapters live under:
-
-```text
-distros/
-├── debian.sh
-├── kali.sh
-└── ubuntu.sh
-```
-
-Every adapter implements:
-
-```text
-distro_validate_environment
-distro_update_package_index
-distro_install_packages
-distro_install_local_package
-distro_package_state
-```
-
-`distro_package_state` provides distro-specific package-state detection.
-
-The function reports one of:
-
-```text
-installed
-absent
-```
-
-An absent package is a successfully determined state, not an error.
-
-A non-zero return code means that package state could not be determined reliably. The bootstrap treats that as a failure instead of assuming the package is absent.
-
-For the current Debian-family adapters, package state is determined using:
-
-```text
-dpkg-query
-```
-
-The same abstraction allows future distributions to use their native mechanisms:
-
-```text
-Debian family -> dpkg-query
-Fedora        -> RPM or DNF state mechanisms
-Arch          -> Pacman state mechanisms
-```
-
-`distro_install_local_package` provides the distro-specific implementation for a previously downloaded local package file.
-
-For example:
-
-```text
-Ubuntu / Debian / Kali
-        |
-        v
-apt-get install ./package.deb
-```
-
-Future adapters can provide their own equivalent operations without changing the external installation framework.
-
-Package-manager commands remain inside distribution adapters.
-
-### Capability Resolution
-
-`lib/capability.sh` translates portable capability identifiers into package names for the selected distribution profile.
-
-For example, a module can request:
-
-```text
-xz
-```
-
-without knowing that the Debian-family package is:
-
-```text
-xz-utils
-```
-
-The mapping is selected independently for each distro:
-
-```text
-Module capability
-       |
-       v
-      xz
-       |
-       +-- Ubuntu -> xz-utils
-       +-- Debian -> xz-utils
-       `-- Kali   -> xz-utils
-```
-
-Future distributions can provide different mappings without changing the module.
-
-For example:
-
-```text
-Fedora -> xz
-Arch   -> xz
-```
-
-A capability may also map to more than one package where a workstation capability requires a package set.
-
-Resolved package names are deduplicated before package-state evaluation.
-
-Missing mappings fail explicitly rather than silently skipping requirements.
-
-### Idempotent Package Installation
-
-Resolved packages are checked before installation.
-
-For each package:
-
-```text
-Resolved package
-       |
-       v
-distro_package_state
-       |
-   +---+---+
-   |       |
-installed absent
-   |       |
-   v       v
-  skip   install
-```
-
-Packages that are already installed are not sent back to the package manager.
-
-For example:
-
-```text
-curl      -> installed -> skip
-xz-utils  -> absent    -> install
-```
-
-If all package requirements for a module are already satisfied, package installation is skipped completely.
-
-Package-state detection remains centralized in distro adapters rather than being duplicated in each module.
-
-This makes repeated bootstrap runs safe and predictable.
-
-### External Installation Framework
-
-`lib/external.sh` provides a controlled path for software that is not installed exclusively from the selected distribution's standard package repositories.
-
-External installer definitions live under:
-
-```text
-installers/<installer-id>.sh
-```
-
-Every external installer implements:
-
-```text
-external_id
-external_name
-external_description
-external_method
-external_state
-```
-
-`external_state` must report:
-
-```text
-installed
-```
-
-or:
-
-```text
-absent
-```
-
-A non-zero return code means the installer could not determine current software state.
-
-Unknown state is treated as an error rather than silently assuming the software is absent.
-
-Supported installation methods are:
-
-```text
-repository
-package
-archive
-script
-```
-
-Each method requires its matching implementation:
-
-```text
-external_repository_apply
-external_package_apply
-external_archive_apply
-external_script_apply
-```
-
-An installer may optionally implement:
-
-```text
-external_validate_environment
-```
-
-Environment validation and installation are only required when `external_state` reports that the software is absent.
-
-If the external software is already installed:
-
-```text
-External installer
-       |
-       v
- external_state
-       |
-   installed
-       |
-       v
-      skip
-```
-
-The framework provides controlled helpers for:
-
-* HTTPS artifact downloads
-* temporary installation staging
-* local distribution package installation
-* installation of prepared system files
-* tar archive extraction
-* ZIP archive extraction
-* staged installer-script execution
-
-External installation logic remains software-specific rather than being added to the bootstrap core.
-
-#### Repository Installations
-
-Repository-based software can prepare vendor repository metadata or signing material and install it through controlled system-file operations.
-
-Repository configuration remains distinct from normal package installation.
-
-#### Local Packages
-
-Downloaded distribution packages are passed back to the selected distro adapter.
-
-This preserves distro independence:
-
-```text
-External Installer
-        |
-        v
-Local package
-        |
-        v
-Distribution Adapter
-        |
-        +-- Debian family -> .deb
-        +-- Fedora        -> .rpm
-        `-- Arch          -> local package format
-```
-
-Fedora and Arch support are future targets and are not currently implemented.
-
-#### Archive Installations
-
-Archive-based software can be downloaded into temporary staging and extracted using controlled helpers.
-
-The framework currently supports tar-compatible archives and ZIP archives.
-
-#### Installer Scripts
-
-Installer scripts must first exist as local staged files.
-
-The framework intentionally does not provide a primitive equivalent to:
-
-```text
-curl <url> | sh
-```
-
-A script must instead be:
-
-```text
-downloaded
-    |
-    v
-staged locally
-    |
-    v
-executed through an explicit interpreter
-```
-
-Artifact integrity and installer verification are handled by dedicated integrity work rather than silently trusting downloaded content.
-
-### Module Framework
-
-`lib/module.sh` loads, validates, and executes reusable workstation capability modules.
-
-Modules live under:
-
-```text
-modules/<module-id>.sh
-```
-
-Every module implements:
-
-```text
-module_id
-module_name
-module_description
-module_capabilities
-```
-
-A module may optionally implement:
-
-```text
-module_apply
-```
-
-`module_capabilities` emits one portable capability identifier per line.
-
-The framework:
-
-1. resolves those capabilities using the selected distro package mapping
-2. checks each resolved package through `distro_package_state`
-3. skips packages already installed
-4. sends only missing packages to `distro_install_packages`
-
-Modules therefore do not implement their own package-state detection.
-
-Modules also do not need to know whether the selected operating system uses `apt-get`, `dnf`, `pacman`, or another package-management implementation.
-
-### Profile Framework
-
-`lib/profile.sh` loads, validates, and executes workstation profiles.
-
-Profiles live under:
-
-```text
-profiles/<profile-id>.sh
-```
-
-Every profile implements:
-
-```text
-profile_id
-profile_name
-profile_description
-profile_modules
-```
-
-Profiles are intentionally declarative. They compose modules without containing package-manager commands, package lists, package-state logic, or duplicated module implementation.
-
-## Configuration Precedence
-
-Runtime configuration follows:
-
-```text
-repository defaults
-        |
-        v
-user-local configuration
-        |
-        v
-explicit CLI arguments
-```
-
-For example:
-
-```text
-repository default : auto
-user configuration: ubuntu
-CLI --distro       : debian
-```
-
-results in:
-
-```text
-debian
-```
-
-If no CLI override is present:
-
-```text
-repository default : auto
-user configuration: ubuntu
-```
-
-results in:
-
-```text
-ubuntu
-```
-
-If no user configuration exists:
-
-```text
-repository default : auto
-```
-
-normal host detection and profile-selection behaviour applies.
-
-This precedence model will also support future workstation profile and module configuration without requiring repository-managed files to contain machine-specific preferences.
-
-## Execution Flow
-
-The bootstrap establishes the host and distro-specific foundation:
-
-```text
-Parse CLI arguments
-       |
-       v
-Initialize logging
-       |
-       v
-Load user configuration
-       |
-       v
-Validate runtime
-       |
-       v
-Detect host system
-       |
-       v
-Resolve distribution profile
-       |
-       v
-Load distribution adapter
-       |
-       v
-Validate adapter environment
-       |
-       v
-Load distro capability mapping
-```
-
-Distribution-profile resolution follows:
-
-```text
-CLI --distro specified?
-        |
-   +----+----+
-   |         |
-  yes        no
-   |         |
-   v         v
- use CLI   user config set?
-               |
-          +----+----+
-          |         |
-         yes        no
-          |         |
-          v         v
-      use config   detection /
-                   interaction
-```
-
-Workstation configuration then builds on that foundation.
-
-Repository-backed capability:
-
-```text
-Workstation profile
-       |
-       v
-Module
-       |
-       v
-Portable capability
-       |
-       v
-Distro package mapping
-       |
-       v
-Package state check
-       |
-  +----+----+
-  |         |
-skip     install
-            |
-            v
-Distribution adapter
-            |
-            v
-Shared execution layer
-```
-
-External software:
-
-```text
-Workstation module
-       |
-       v
-External installer definition
-       |
-       v
-External state check
-       |
-  +----+----+
-  |         |
-skip     install
-            |
-            v
-Explicit installation method
-            |
-            v
-External framework helper
-            |
-            v
-Distribution adapter and/or
-shared execution layer
-```
-
-Workstation profile selection through the public CLI is introduced separately. Loading the frameworks themselves does not install software.
-
-## Distribution Profiles vs Workstation Profiles
-
-The project uses two different kinds of profiles.
-
-A **distribution profile** selects operating-system behavior:
-
-```text
-ubuntu
-debian
-kali
-```
-
-A **workstation profile** selects workstation capabilities:
-
-```text
-default
-developer
-security
-```
-
-For example:
-
-```text
-Ubuntu distribution profile
-        +
-Developer workstation profile
-        |
-        v
-Developer modules
-        |
-        v
-Portable capabilities
-        |
-        v
-Ubuntu package mappings
-        |
-        v
-Package-state checks
-        |
-        v
-Ubuntu adapter
-```
-
-Keeping these concepts separate allows the same workstation profile and modules to operate across multiple Linux distributions.
-
-## Package Capability Model
-
-Capability identifiers represent software intent rather than package-manager syntax.
-
-Examples:
-
-```text
-curl
-wget
-nano
-sed
-dos2unix
-xz
-figlet
-```
-
-The identifiers should remain stable even when distro package names differ.
-
-For example:
-
-```text
-Ubuntu -> xz-utils
-Debian -> xz-utils
-Kali   -> xz-utils
-Fedora -> xz
-Arch   -> xz
-```
-
-Fedora and Arch are future support targets. Their package managers, state mechanisms, and mappings should be added through distro adapters and capability mapping files rather than conditions inside shared modules.
-
-## Idempotency
-
-Linux Workstation Bootstrap is designed to be safely rerunnable.
-
-A repeated run evaluates the current workstation state before attempting installation.
-
-For repository packages:
-
-```text
-already installed -> skip
-missing           -> install
-unknown state     -> fail safely
-```
-
-For external software:
-
-```text
-already installed -> skip
-missing           -> execute installer
-unknown state     -> fail safely
-```
-
-A state-check failure is never silently interpreted as absence.
-
-This protects against unnecessary reinstallations and prevents uncertain state from triggering unintended system changes.
-
-Dry-run mode still evaluates current installation state so it can distinguish operations that are already satisfied from operations that would be required.
-
-## Standard vs External Software
-
-Software from the selected distribution's normal repositories should use:
-
-```text
-Capability
-    |
-    v
-Package Mapping
-    |
-    v
-Package State
-    |
-    v
-Distro Adapter
-```
-
-Software requiring additional mechanisms should use:
-
-```text
-External Installer
-```
-
-Examples of external installation candidates include:
-
-```text
-vendor repositories
-vendor distribution packages
-downloaded archives
-language-package-manager tools
-explicit installer scripts
-```
-
-The external path should not be used merely to bypass normal package capability resolution.
-
-## Modules and Profiles
-
-Modules represent reusable workstation capabilities such as:
-
-```text
-common utilities
-development tools
-containers
-database tooling
-desktop and media applications
-security tooling
-hardware and power management
-```
-
-Profiles compose those modules into coherent workstation configurations without duplicating their implementation.
-
-For example:
-
-```text
-developer profile
-├── common utilities
-├── development tools
-├── containers
-└── database tooling
-```
-
-## Requirements
-
-* Linux
-* Bash 5 or newer
-* `/etc/os-release`
-
-Ubuntu, Debian, and Kali Linux package operations additionally require:
-
-* APT
-* `apt-get`
-* `dpkg-query`
-
-Some external installation methods may additionally require utilities such as:
-
-* `curl`
-* `tar`
-* `unzip`
-
-Specific external installer definitions are responsible for validating the tools they require.
-
-## Clone and Run
+## Usage
 
 Clone the repository:
 
 ```bash
 git clone https://github.com/LinuxEuphony/linux-workstation-bootstrap.git
-```
-
-Enter the project directory:
-
-```bash
 cd linux-workstation-bootstrap
-```
-
-Make the bootstrap executable:
-
-```bash
-chmod +x bin/linux-workstation-bootstrap
 ```
 
 Run the bootstrap:
@@ -1134,20 +248,12 @@ Run the bootstrap:
 ./bin/linux-workstation-bootstrap
 ```
 
-The detected system configuration is displayed before a distribution profile, adapter, and package capability mapping are selected.
-
-## Usage
-
-```text
-./bin/linux-workstation-bootstrap [options]
-```
-
 Available options:
 
 ```text
 --distro <profile>   Use a specific distribution profile
---dry-run            Preview actions without applying system changes
--y, --yes            Accept a supported detected profile without prompting
+--dry-run            Preview actions without applying changes
+-y, --yes            Accept supported confirmations non-interactively
 --version            Display the application version
 -h, --help           Display help
 ```
@@ -1155,166 +261,129 @@ Available options:
 Examples:
 
 ```bash
-./bin/linux-workstation-bootstrap --help
-```
-
-```bash
-./bin/linux-workstation-bootstrap --version
-```
-
-```bash
 ./bin/linux-workstation-bootstrap --dry-run --yes
 ```
 
 ```bash
-./bin/linux-workstation-bootstrap --distro ubuntu --dry-run
+./bin/linux-workstation-bootstrap \
+  --distro ubuntu \
+  --dry-run
 ```
-
-```bash
-./bin/linux-workstation-bootstrap --distro debian --dry-run
-```
-
-```bash
-./bin/linux-workstation-bootstrap --distro kali --dry-run
-```
-
-Selecting a different distribution profile does not alter the detected host information.
-
-An explicit `--distro` option overrides `distro_profile` from user configuration.
-
-## User Configuration Example
-
-Create the configuration directory:
-
-```bash
-mkdir -p ~/.config/linux-workstation-bootstrap
-```
-
-Create:
-
-```text
-~/.config/linux-workstation-bootstrap/config.conf
-```
-
-Example:
-
-```ini
-# Linux Workstation Bootstrap
-
-distro_profile=ubuntu
-```
-
-The file is user-local and lives outside the repository.
-
-Do not store machine-specific preferences in `config/defaults.sh`.
 
 ## Logging
 
-Each bootstrap execution creates a dedicated session log.
-
-By default, logs are stored under:
+Execution logs are stored by default under:
 
 ```text
 ~/.local/state/linux-workstation-bootstrap/logs/
 ```
 
-If `XDG_STATE_HOME` is configured, it is used as the state directory instead.
+`XDG_STATE_HOME` is respected when configured.
 
-The bootstrap displays the current session log and log directory during execution.
-
-Configuration loading, selection precedence, installation-state decisions, skipped package requirements, missing packages, external-software state checks, installation attempts, and failures are recorded in the session log.
+Logs capture significant bootstrap, planning, state, execution, and verification events without enabling shell tracing or blindly logging command arguments.
 
 ## Project Structure
 
 ```text
 linux-workstation-bootstrap/
-├── bin/
-│   └── linux-workstation-bootstrap
-├── config/
-│   ├── defaults.sh
-│   └── packages/
-│       ├── debian.sh
-│       ├── kali.sh
-│       └── ubuntu.sh
-├── lib/
-│   ├── arguments.sh
-│   ├── bootstrap.sh
-│   ├── capability.sh
-│   ├── config.sh
-│   ├── core.sh
-│   ├── detect.sh
-│   ├── distro.sh
-│   ├── execution.sh
-│   ├── external.sh
-│   ├── logging.sh
-│   ├── module.sh
-│   ├── profile.sh
-│   └── ui.sh
-├── distros/
-│   ├── debian.sh
-│   ├── kali.sh
-│   └── ubuntu.sh
-├── installers/
-├── modules/
-├── profiles/
-├── tests/
-├── docs/
+├── bin/             # Public CLI entrypoint
+├── config/          # Defaults and distro package mappings
+├── distros/         # Distribution-specific adapters
+├── docs/            # Detailed project documentation
+├── installers/      # External software installers
+├── lib/             # Shared bootstrap infrastructure
+├── modules/         # Reusable workstation capabilities
+├── profiles/        # Workstation profile definitions
+├── tests/           # Automated Bash tests
 └── README.md
 ```
 
-The `installers/` directory contains software-specific external installer definitions as they are introduced.
+Important shared components include:
 
-Concrete workstation modules and profiles are added independently of their shared frameworks.
+```text
+lib/bootstrap.sh       application lifecycle
+lib/capability.sh      capability resolution
+lib/config.sh          user configuration
+lib/distro.sh          distro adapter framework
+lib/execution.sh       controlled command execution
+lib/external.sh        external installation framework
+lib/module.sh          module framework
+lib/plan.sh            execution planning
+lib/profile.sh         profile framework
+lib/verification.sh    post-install verification
+```
+
+## Development Validation
+
+Run the automated test suite:
+
+```bash
+bash tests/run.sh
+```
+
+For repository-wide shell validation:
+
+```bash
+mapfile -d '' -t shell_files < <(
+  git ls-files -z \
+    --cached \
+    --others \
+    --exclude-standard \
+    -- '*.sh' 'bin/*'
+)
+
+for shell_file in "${shell_files[@]}"; do
+  bash -n "$shell_file"
+done
+
+shellcheck -x "${shell_files[@]}"
+
+shfmt \
+  -d \
+  -i 4 \
+  -ci \
+  "${shell_files[@]}"
+
+bash tests/run.sh
+
+git diff --check
+```
+
+GitHub Actions performs the same core syntax, linting, formatting, and test validation on repository changes.
 
 ## Safety
 
-Linux Workstation Bootstrap is designed to make system changes deliberately and visibly.
+Linux Workstation Bootstrap is designed around explicit and reviewable system changes.
 
-Repository defaults, user-local configuration, CLI arguments, host detection, distribution selection, capability resolution, package-state detection, external installer validation, external software state detection, adapter validation, module validation, profile validation, logging, and execution logic are separated so operations can be checked before system changes are applied.
+Key safeguards include:
 
-User configuration is parsed as data and is never sourced as arbitrary shell code.
+- dry-run support
+- package and software state checks before installation
+- execution plans before modification
+- centralized privilege handling
+- distro-specific package operations isolated in adapters
+- portable capabilities instead of package names in modules
+- safe failure on unknown installation state
+- staged external scripts instead of `curl | sh`
+- post-install verification
+- user configuration parsed as data
+- automated syntax, lint, formatting, and test validation
 
-Only explicitly supported settings may be overridden.
+## Documentation
 
-Invalid, duplicate, or unsupported configuration values fail clearly.
+Detailed design and implementation documentation belongs under:
 
-CLI selections retain higher precedence than user configuration.
+```text
+docs/
+```
 
-Machine-specific configuration remains outside repository-managed defaults.
+The repository already includes:
 
-Dry-run mode provides a way to preview execution without applying changes.
+```text
+docs/testing.md
+```
 
-Current installation state is evaluated before package or external software installation.
-
-Already-satisfied requirements are skipped.
-
-Unknown or failed state checks stop execution rather than being interpreted as missing software.
-
-Command execution and privilege escalation are centralized so system-changing operations use a consistent execution path.
-
-Distribution-specific package names are isolated in package mapping files.
-
-Distribution-specific package-state checks remain inside distro adapters.
-
-Package-manager commands remain inside distribution adapters.
-
-Modules request portable capabilities instead of embedding distro package names.
-
-Modules do not duplicate package-state detection logic.
-
-External software uses explicit, reviewable installation methods and explicit installed-state checks.
-
-External downloads require HTTPS.
-
-Remote scripts are not piped directly into a shell.
-
-Temporary external installation files are staged predictably and cleaned after execution.
-
-Profiles do not contain package-manager commands or duplicate module implementation.
-
-Loading configuration, a distro adapter, capability mapping, external installer definition, module, or profile does not itself change the workstation.
-
-Artifact integrity and external installer verification are separate concerns that build on the external installation framework.
+Additional architecture and framework documentation is maintained separately from the README as those areas evolve.
 
 ## Project
 
