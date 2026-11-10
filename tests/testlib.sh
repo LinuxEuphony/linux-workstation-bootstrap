@@ -17,6 +17,7 @@ declare -a LWBS_TEST_CLEANUP_PATHS=()
 run_test() {
     local test_name="${1:-}"
     local test_function="${2:-}"
+    local test_exit_code
 
     if [[ -z "$test_name" || -z "$test_function" ]]; then
         printf 'Error: run_test requires a name and test function.\n' >&2
@@ -27,10 +28,19 @@ run_test() {
 
     printf 'TEST: %s\n' "$test_name"
 
-    if (
+    # Do not execute the subshell directly as the condition of an if
+    # statement. Bash suppresses errexit semantics for commands whose status
+    # is being tested by a conditional, which can allow failed assertions
+    # inside the test function to be followed by a successful command and
+    # incorrectly report the test as passing.
+    (
         set -Eeuo pipefail
         "$test_function"
-    ); then
+    )
+
+    test_exit_code=$?
+
+    if ((test_exit_code == 0)); then
         printf 'PASS: %s\n\n' "$test_name"
         return 0
     fi
