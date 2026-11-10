@@ -57,6 +57,8 @@ test_require_command_rejects_missing_command() {
 }
 
 test_runtime_accepts_linux() {
+    # Mocked command invoked indirectly by validate_runtime().
+    # shellcheck disable=SC2329
     uname() {
         printf '%s\n' "Linux"
     }
@@ -65,6 +67,8 @@ test_runtime_accepts_linux() {
 }
 
 test_runtime_rejects_non_linux() {
+    # Mocked command invoked indirectly by validate_runtime().
+    # shellcheck disable=SC2329
     uname() {
         printf '%s\n' "Darwin"
     }

@@ -1,0 +1,11 @@
+# Linux Workstation Bootstrap ShellCheck configuration.
+#
+# The application is intentionally split across sourced Bash files. Allow
+# ShellCheck to follow those source relationships relative to each script.
+shell=bash
+external-sources=true
+source-path=SCRIPTDIR
+
+# SC2034 reports shared state as unused when individual sourced files are
+# analyzed independently. These globals are consumed across bootstrap layers.
+disable=SC2034

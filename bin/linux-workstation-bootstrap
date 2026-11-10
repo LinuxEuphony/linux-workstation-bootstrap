@@ -15,7 +15,8 @@ set -Eeuo pipefail
 
 # Resolve the repository root regardless of where the command is executed from.
 # BASH_SOURCE[0] points to this script inside the bin/ directory.
-readonly LWBS_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+LWBS_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+readonly LWBS_ROOT
 
 # Load the main bootstrap application logic.
 # shellcheck source=../lib/bootstrap.sh

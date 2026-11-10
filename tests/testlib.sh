@@ -11,6 +11,8 @@
 LWBS_TEST_COUNT=0
 LWBS_TEST_FAILURE_COUNT=0
 
+declare -a LWBS_TEST_CLEANUP_PATHS=()
+
 # Execute one test function in an isolated subshell.
 run_test() {
     local test_name="${1:-}"
@@ -94,22 +96,28 @@ make_test_temp_dir() {
     mktemp -d "${TMPDIR:-/tmp}/lwbs-test.XXXXXX"
 }
 
+# Remove all temporary paths registered by the current isolated test.
+cleanup_test_paths() {
+    local path
+
+    for path in "${LWBS_TEST_CLEANUP_PATHS[@]}"; do
+        [[ -z "$path" ]] && continue
+        rm -rf -- "$path"
+    done
+}
+
 # Register one temporary path for removal when the isolated test exits.
-#
-# The path is shell-escaped when the trap is registered so cleanup does not
-# depend on a local variable that may no longer exist when the EXIT trap runs.
 register_test_cleanup() {
     local path="${1:-}"
-    local escaped_path
 
     if [[ -z "$path" ]]; then
         printf 'Error: register_test_cleanup requires a path.\n' >&2
         return 2
     fi
 
-    printf -v escaped_path '%q' "$path"
+    LWBS_TEST_CLEANUP_PATHS+=("$path")
 
-    trap "rm -rf -- $escaped_path" EXIT
+    trap 'cleanup_test_paths' EXIT
 }
 
 # Initialize logging beneath an isolated test directory.
