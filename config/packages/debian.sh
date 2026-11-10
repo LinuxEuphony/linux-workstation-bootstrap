@@ -11,12 +11,12 @@
 # A capability may map to multiple packages by separating package names
 # with newlines.
 
-LWBS_CAPABILITY_PACKAGES=(
-    [curl]="curl"
-    [dos2unix]="dos2unix"
-    [figlet]="figlet"
-    [nano]="nano"
-    [sed]="sed"
-    [wget]="wget"
-    [xz]="xz-utils"
+declare -gA LWBS_CAPABILITY_PACKAGES=(
+    ["curl"]="curl"
+    ["dos2unix"]="dos2unix"
+    ["figlet"]="figlet"
+    ["nano"]="nano"
+    ["sed"]="sed"
+    ["wget"]="wget"
+    ["xz"]="xz-utils"
 )

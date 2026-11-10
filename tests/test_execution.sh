@@ -58,6 +58,8 @@ test_command_exit_code_is_preserved() {
 
     LWBS_DRY_RUN=false
 
+    # Command passed by name into the shared execution wrapper.
+    # shellcheck disable=SC2329
     controlled_failure() {
         return 7
     }
