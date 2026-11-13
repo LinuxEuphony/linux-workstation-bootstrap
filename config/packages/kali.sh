@@ -17,6 +17,7 @@ declare -gA LWBS_CAPABILITY_PACKAGES=(
     ["cloc"]="cloc"
     ["cmake"]="cmake"
     ["curl"]="curl"
+    ["docker-engine"]="docker.io"
     ["dos2unix"]="dos2unix"
     ["figlet"]="figlet"
     ["flex"]="flex"
@@ -26,6 +27,7 @@ declare -gA LWBS_CAPABILITY_PACKAGES=(
     ["scons"]="scons"
     ["sed"]="sed"
     ["swig"]="swig"
+    ["vmware-guest-tools"]="open-vm-tools"
     ["wget"]="wget"
     ["xz"]="xz-utils"
 )
