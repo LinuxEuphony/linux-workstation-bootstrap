@@ -24,6 +24,7 @@ declare -gA LWBS_CAPABILITY_PACKAGES=(
     ["git"]="git"
     ["nano"]="nano"
     ["pkg-config"]="pkg-config"
+    ["postgresql-client"]="postgresql-client"
     ["scons"]="scons"
     ["sed"]="sed"
     ["swig"]="swig"
