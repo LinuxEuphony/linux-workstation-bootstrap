@@ -127,7 +127,7 @@ test_adapter_environment_validation_without_host_changes() {
     setup_test_logging "$temp_dir"
 
     # Mocked command invoked indirectly by distro_validate_environment().
-    # shellcheck disable=SC2329
+    # shellcheck disable=SC2317,SC2329
     require_command() {
         return 0
     }
@@ -154,7 +154,7 @@ test_adapter_rejects_incompatible_family() {
     setup_test_logging "$temp_dir"
 
     # Mocked command invoked indirectly by distro_validate_environment().
-    # shellcheck disable=SC2329
+    # shellcheck disable=SC2317,SC2329
     require_command() {
         return 0
     }

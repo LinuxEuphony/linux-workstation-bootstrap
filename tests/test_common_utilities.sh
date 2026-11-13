@@ -109,7 +109,7 @@ test_common_utilities_verification_succeeds() {
 
     # Verification dependency mocked so this test does not depend on which
     # utilities happen to be installed on the developer workstation.
-    # shellcheck disable=SC2329
+    # shellcheck disable=SC2317,SC2329
     command_exists() {
         return 0
     }
@@ -131,7 +131,7 @@ test_common_utilities_verification_detects_missing_command() {
 
     # Simulate one package being present while its expected executable is not
     # usable so module-level verification must reject the result.
-    # shellcheck disable=SC2329
+    # shellcheck disable=SC2317,SC2329
     command_exists() {
         local command_name="${1:-}"
 
@@ -240,7 +240,7 @@ EOF
 
     # Planning needs package state but must not perform installation during
     # dry-run. All requirements are marked absent to produce a complete plan.
-    # shellcheck disable=SC2329
+    # shellcheck disable=SC2317,SC2329
     distro_package_state() {
         printf '%s\n' "absent"
     }
