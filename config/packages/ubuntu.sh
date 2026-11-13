@@ -12,11 +12,20 @@
 # with newlines.
 
 declare -gA LWBS_CAPABILITY_PACKAGES=(
+    ["bison"]="bison"
+    ["build-toolchain"]="build-essential"
+    ["cloc"]="cloc"
+    ["cmake"]="cmake"
     ["curl"]="curl"
     ["dos2unix"]="dos2unix"
     ["figlet"]="figlet"
+    ["flex"]="flex"
+    ["git"]="git"
     ["nano"]="nano"
+    ["pkg-config"]="pkg-config"
+    ["scons"]="scons"
     ["sed"]="sed"
+    ["swig"]="swig"
     ["wget"]="wget"
     ["xz"]="xz-utils"
 )
