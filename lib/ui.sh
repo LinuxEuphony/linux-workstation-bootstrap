@@ -10,8 +10,9 @@
 # 3. Displays detected system information.
 # 4. Handles confirmation prompts.
 # 5. Allows the user to select a distribution profile.
-# 6. Confirms resolved execution plans.
-# 7. Displays command-line help and version information.
+# 6. Displays available workstation profiles.
+# 7. Confirms resolved execution plans.
+# 8. Displays command-line help and version information.
 
 clear_screen() {
     if [[ -t 1 ]]; then
@@ -158,6 +159,10 @@ choose_distro_profile() {
     done
 }
 
+show_available_profiles() {
+    list_available_profiles
+}
+
 # Confirm a fully resolved execution plan.
 #
 # --yes explicitly approves the plan without a prompt. Non-interactive
@@ -203,14 +208,25 @@ Usage:
   ./bin/linux-workstation-bootstrap [options]
 
 Options:
-  --distro <profile>   Use a specific distribution profile
-  --dry-run            Preview actions without applying system changes
-  -y, --yes            Approve confirmation prompts without interaction
-  --version            Display the application version
-  -h, --help           Display this help
+  --distro <profile>        Use a specific distribution profile
+  --profile <name>          Use a specific workstation profile
+  --module <id>             Add a module to the selected profile
+                            May be specified more than once
+  --exclude-module <id>     Remove a module from the selected profile
+                            May be specified more than once
+  --list-profiles           List available workstation profiles
+  --dry-run                 Preview actions without applying system changes
+  -y, --yes                 Approve confirmation prompts without interaction
+  --version                 Display the application version
+  -h, --help                Display this help
+
+Default workstation profile:
+  $LWBS_DEFAULT_WORKSTATION_PROFILE
 
 Supported distribution profiles:
 $(printf '  %s\n' "${LWBS_SUPPORTED_DISTROS[@]}")
+
+Use --list-profiles to view available workstation profiles.
 
 EOF
 }

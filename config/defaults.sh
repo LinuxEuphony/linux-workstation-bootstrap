@@ -9,8 +9,9 @@
 # 2. Defines runtime requirements.
 # 3. Defines supported distribution profiles.
 # 4. Defines distribution, package manager, and architecture mappings.
-# 5. Defines user-configuration defaults and locations.
-# 6. Defines persistent logging defaults.
+# 5. Defines workstation profile defaults.
+# 6. Defines user-configuration defaults and locations.
+# 7. Defines persistent logging defaults.
 
 # Application identity.
 readonly LWBS_APP_NAME="Linux Workstation Bootstrap"
@@ -42,6 +43,10 @@ declare -Ar LWBS_DISTRO_DISPLAY_NAMES=(
 # "auto" means the bootstrap should use normal host detection and
 # confirmation rather than forcing a specific distribution profile.
 readonly LWBS_DEFAULT_DISTRO_PROFILE="auto"
+
+# Default workstation profile used when the CLI does not explicitly select
+# another profile.
+readonly LWBS_DEFAULT_WORKSTATION_PROFILE="default"
 
 # User configuration location.
 #
