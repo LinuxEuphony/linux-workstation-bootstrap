@@ -227,6 +227,15 @@ build_profile_execution_plan() {
             LWBS_PLAN_MODULE_HAS_VERIFY["$module_id"]="false"
         fi
 
+        if plan_module_services "$module_id"; then
+            :
+        else
+            exit_code=$?
+            reset_module_contract
+            LWBS_PLAN_STATUS="invalid"
+            return "$exit_code"
+        fi
+
         reset_module_contract
     done
 
@@ -241,7 +250,7 @@ build_profile_execution_plan() {
 
 log_execution_plan() {
     log_info \
-        "Execution plan resolved: profile=$LWBS_PLAN_PROFILE_ID distro=$LWBS_PLAN_DISTRO_PROFILE modules=${#LWBS_PLAN_MODULES[@]} install_actions=$LWBS_PLAN_INSTALL_ACTION_COUNT skip_actions=$LWBS_PLAN_SKIP_ACTION_COUNT custom_actions=$LWBS_PLAN_CUSTOM_ACTION_COUNT"
+        "Execution plan resolved: profile=$LWBS_PLAN_PROFILE_ID distro=$LWBS_PLAN_DISTRO_PROFILE modules=${#LWBS_PLAN_MODULES[@]} install_actions=$LWBS_PLAN_INSTALL_ACTION_COUNT service_actions=$LWBS_PLAN_SERVICE_ACTION_COUNT skip_actions=$LWBS_PLAN_SKIP_ACTION_COUNT custom_actions=$LWBS_PLAN_CUSTOM_ACTION_COUNT"
 }
 
 show_execution_plan() {
@@ -295,6 +304,8 @@ show_execution_plan() {
             fi
         done <<<"${LWBS_PLAN_MODULE_EXTERNALS[$module_id]:-}"
 
+        show_module_service_plan "$module_id"
+
         if [[ "${LWBS_PLAN_MODULE_HAS_APPLY[$module_id]:-false}" == "true" ]]; then
             printf '  Custom action: module_apply\n'
         fi
@@ -309,7 +320,8 @@ show_execution_plan() {
 
 execution_plan_has_changes() {
     ((LWBS_PLAN_INSTALL_ACTION_COUNT > 0 || \
-    LWBS_PLAN_CUSTOM_ACTION_COUNT > 0))
+    LWBS_PLAN_CUSTOM_ACTION_COUNT > 0 || \
+    LWBS_PLAN_SERVICE_ACTION_COUNT > 0))
 }
 
 execute_planned_packages() {
@@ -758,6 +770,15 @@ execute_resolved_plan() {
             show_execution_summary
             return "$exit_code"
         fi
+
+        if execute_planned_service_actions "$module_id"; then
+            :
+        else
+            exit_code=$?
+            LWBS_PLAN_STATUS="failed"
+            show_execution_summary
+            return "$exit_code"
+        fi
     done
 
     show_execution_summary
@@ -838,6 +859,8 @@ run_profile_execution_plan() {
                     "skipped" \
                     "already installed"
             done <<<"${LWBS_PLAN_MODULE_EXTERNALS[$module_id]:-}"
+
+            record_skipped_service_results "$module_id"
         done
 
         LWBS_PLAN_STATUS="completed"
@@ -890,4 +913,6 @@ reset_execution_plan() {
     LWBS_PLAN_EXTERNAL_ACTIONS=()
     LWBS_PLAN_MODULE_HAS_APPLY=()
     LWBS_PLAN_MODULE_HAS_VERIFY=()
+
+    reset_service_execution_plan
 }
