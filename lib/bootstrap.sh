@@ -25,6 +25,9 @@ source "$LWBS_ROOT/lib/core.sh"
 # shellcheck source=./execution.sh
 source "$LWBS_ROOT/lib/execution.sh"
 
+# shellcheck source=./service.sh
+source "$LWBS_ROOT/lib/service.sh"
+
 # shellcheck source=./distro.sh
 source "$LWBS_ROOT/lib/distro.sh"
 
@@ -48,6 +51,9 @@ source "$LWBS_ROOT/lib/ui.sh"
 
 # shellcheck source=./verification.sh
 source "$LWBS_ROOT/lib/verification.sh"
+
+# shellcheck source=./service-plan.sh
+source "$LWBS_ROOT/lib/service-plan.sh"
 
 # shellcheck source=./plan.sh
 source "$LWBS_ROOT/lib/plan.sh"

@@ -12,14 +12,15 @@
 # 2. Validates the module contract.
 # 3. Captures module metadata and capability requirements.
 # 4. Captures declarative external software requirements.
-# 5. Resolves capabilities through the selected distro package mapping.
-# 6. Checks resolved package installation state through the distro adapter.
-# 7. Skips package requirements that are already satisfied.
-# 8. Routes missing packages through the selected distro adapter.
-# 9. Executes declared external installers through the shared framework.
-# 10. Supports optional module-specific operations.
-# 11. Supports optional module-level post-install verification.
-# 12. Preserves dry-run behaviour through shared execution utilities.
+# 5. Captures declarative service-state requirements.
+# 6. Resolves capabilities through the selected distro package mapping.
+# 7. Checks resolved package installation state through the distro adapter.
+# 8. Skips package requirements that are already satisfied.
+# 9. Routes missing packages through the selected distro adapter.
+# 10. Executes declared external installers through the shared framework.
+# 11. Supports optional module-specific operations.
+# 12. Supports optional module-level post-install verification.
+# 13. Preserves dry-run behaviour through shared execution utilities.
 
 LWBS_MODULE_ID=""
 LWBS_MODULE_NAME=""
@@ -28,6 +29,7 @@ LWBS_MODULE_PATH=""
 
 declare -a LWBS_MODULE_CAPABILITIES=()
 declare -a LWBS_MODULE_EXTERNAL_INSTALLERS=()
+declare -a LWBS_MODULE_SERVICES=()
 
 load_module() {
     local requested_module="${1:-}"
@@ -35,10 +37,17 @@ load_module() {
     local module_path
     local capability_output
     local external_output
+    local service_output
     local capability
     local installer_id
+    local service_requirement
+    local service_name
+    local enabled_state
+    local active_state
+    local restart_policy
 
     local -A seen_external_installers=()
+    local -A seen_services=()
 
     if [[ -z "$requested_module" ]]; then
         printf 'Error: no module was provided.\n' >&2
@@ -194,8 +203,56 @@ load_module() {
         done <<<"$external_output"
     fi
 
+    LWBS_MODULE_SERVICES=()
+
+    if declare -F module_services >/dev/null 2>&1; then
+        if service_output="$(module_services)"; then
+            :
+        else
+            printf 'Error: unable to read service requirements for module: %s\n' \
+                "$requested_module" >&2
+
+            reset_module_contract
+            return 1
+        fi
+
+        while IFS= read -r service_requirement; do
+            [[ -z "$service_requirement" ]] && continue
+
+            if parse_service_requirement \
+                "$service_requirement" \
+                service_name \
+                enabled_state \
+                active_state \
+                restart_policy; then
+                :
+            else
+                printf 'Error: invalid service requirement in module %s.\n' \
+                    "$requested_module" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            if [[ -n "${seen_services[$service_name]+defined}" ]]; then
+                printf 'Error: duplicate service requirement in module %s: %s\n' \
+                    "$requested_module" \
+                    "$service_name" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            seen_services["$service_name"]=1
+            LWBS_MODULE_SERVICES+=(
+                "$service_name $enabled_state $active_state $restart_policy"
+            )
+        done <<<"$service_output"
+    fi
+
     if ((${#LWBS_MODULE_CAPABILITIES[@]} == 0 && \
-        ${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} == 0)) &&
+        ${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} == 0 && \
+        ${#LWBS_MODULE_SERVICES[@]} == 0)) &&
             ! declare -F module_apply >/dev/null 2>&1 &&
             ! declare -F module_verify >/dev/null 2>&1; then
 
@@ -209,7 +266,7 @@ load_module() {
     LWBS_MODULE_PATH="$module_path"
 
     log_info \
-        "Module loaded: id=$LWBS_MODULE_ID capability_count=${#LWBS_MODULE_CAPABILITIES[@]} external_count=${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]}"
+        "Module loaded: id=$LWBS_MODULE_ID capability_count=${#LWBS_MODULE_CAPABILITIES[@]} external_count=${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} service_count=${#LWBS_MODULE_SERVICES[@]}"
 
     return 0
 }
@@ -322,6 +379,12 @@ execute_loaded_module() {
         return 1
     fi
 
+    if ((${#LWBS_MODULE_SERVICES[@]} > 0)); then
+        printf 'Error: modules with managed service requirements must execute through the planning framework.\n' \
+            >&2
+        return 1
+    fi
+
     if ((${#LWBS_MODULE_CAPABILITIES[@]} > 0)); then
         if resolve_capabilities \
             resolved_packages \
@@ -380,6 +443,7 @@ reset_module_contract() {
         module_description \
         module_capabilities \
         module_external_installers \
+        module_services \
         module_apply \
         module_verify \
         2>/dev/null || true
@@ -390,4 +454,5 @@ reset_module_contract() {
     LWBS_MODULE_PATH=""
     LWBS_MODULE_CAPABILITIES=()
     LWBS_MODULE_EXTERNAL_INSTALLERS=()
+    LWBS_MODULE_SERVICES=()
 }
