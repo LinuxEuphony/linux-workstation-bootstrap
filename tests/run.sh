@@ -22,6 +22,7 @@ declare -a TEST_FILES=(
     "$TEST_DIR/test_hardware_power.sh"
     "$TEST_DIR/test_profile_selection.sh"
     "$TEST_DIR/test_workstation_profiles.sh"
+    "$TEST_DIR/test_preflight.sh"
 )
 
 failed_files=0
