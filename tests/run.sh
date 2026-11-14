@@ -18,6 +18,7 @@ declare -a TEST_FILES=(
     "$TEST_DIR/test_database_tools.sh"
     "$TEST_DIR/test_desktop_media.sh"
     "$TEST_DIR/test_service.sh"
+    "$TEST_DIR/test_security_tools.sh"
 )
 
 failed_files=0
