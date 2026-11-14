@@ -28,6 +28,9 @@ source "$LWBS_ROOT/lib/execution.sh"
 # shellcheck source=./service.sh
 source "$LWBS_ROOT/lib/service.sh"
 
+# shellcheck source=./hardware.sh
+source "$LWBS_ROOT/lib/hardware.sh"
+
 # shellcheck source=./distro.sh
 source "$LWBS_ROOT/lib/distro.sh"
 
