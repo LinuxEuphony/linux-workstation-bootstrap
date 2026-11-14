@@ -64,6 +64,9 @@ source "$LWBS_ROOT/lib/plan.sh"
 SELECTED_DISTRO_PROFILE=""
 
 bootstrap_main() {
+    local workstation_profile
+    local exit_code
+
     clear_screen
 
     if ! parse_arguments "$@"; then
@@ -79,6 +82,10 @@ bootstrap_main() {
         version)
             show_version
             return 0
+            ;;
+        list-profiles)
+            show_available_profiles
+            return $?
             ;;
     esac
 
@@ -123,7 +130,7 @@ bootstrap_main() {
     log_info \
         "Selected distribution profile: $SELECTED_DISTRO_PROFILE"
 
-    printf 'Selected profile: %s\n' \
+    printf 'Selected distribution profile: %s\n' \
         "$(distro_profile_name "$SELECTED_DISTRO_PROFILE")"
 
     if [[ "$SELECTED_DISTRO_PROFILE" != "$SYSTEM_DISTRO_ID" ]]; then
@@ -150,53 +157,38 @@ bootstrap_main() {
         return 1
     fi
 
+    workstation_profile="${LWBS_REQUESTED_WORKSTATION_PROFILE:-$LWBS_DEFAULT_WORKSTATION_PROFILE}"
+
+    printf 'Selected workstation profile: %s\n' \
+        "$workstation_profile"
+
+    log_info \
+        "Selected workstation profile: $workstation_profile"
+
     if "$LWBS_DRY_RUN"; then
         printf '\nDry-run mode enabled. No system changes will be applied.\n'
     fi
 
-    log_info "Bootstrap foundation completed."
+    if run_profile "$workstation_profile"; then
+        :
+    else
+        exit_code=$?
+
+        log_error \
+            "Workstation profile execution failed: profile=$workstation_profile exit_code=$exit_code"
+
+        show_failure_info
+        return "$exit_code"
+    fi
+
+    if [[ "$LWBS_PLAN_STATUS" == "cancelled" ]]; then
+        log_info "Bootstrap cancelled during execution-plan confirmation."
+        show_cancellation_info
+        return 0
+    fi
+
+    log_info \
+        "Bootstrap completed: profile=$workstation_profile status=$LWBS_PLAN_STATUS"
 
     show_completion_info
-}
-
-select_distro_profile() {
-    if [[ -n "$LWBS_REQUESTED_DISTRO_PROFILE" ]]; then
-        if ! is_supported_distro "$LWBS_REQUESTED_DISTRO_PROFILE"; then
-            printf 'Error: unsupported distribution profile: %s\n' \
-                "$LWBS_REQUESTED_DISTRO_PROFILE" >&2
-
-            return 1
-        fi
-
-        SELECTED_DISTRO_PROFILE="$LWBS_REQUESTED_DISTRO_PROFILE"
-        return 0
-    fi
-
-    if [[ -n "${LWBS_CONFIG_DISTRO_PROFILE:-}" &&
-        "$LWBS_CONFIG_DISTRO_PROFILE" != "auto" ]]; then
-
-        SELECTED_DISTRO_PROFILE="$LWBS_CONFIG_DISTRO_PROFILE"
-        return 0
-    fi
-
-    if "$LWBS_ASSUME_YES"; then
-        if is_supported_distro "$SYSTEM_DISTRO_ID"; then
-            SELECTED_DISTRO_PROFILE="$SYSTEM_DISTRO_ID"
-            return 0
-        fi
-
-        printf 'Error: detected distribution "%s" is not currently supported.\n' \
-            "$SYSTEM_DISTRO_ID" >&2
-
-        return 1
-    fi
-
-    if is_supported_distro "$SYSTEM_DISTRO_ID" &&
-        confirm_detected_profile; then
-
-        SELECTED_DISTRO_PROFILE="$SYSTEM_DISTRO_ID"
-        return 0
-    fi
-
-    choose_distro_profile
 }
