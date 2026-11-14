@@ -61,6 +61,9 @@ source "$LWBS_ROOT/lib/service-plan.sh"
 # shellcheck source=./plan.sh
 source "$LWBS_ROOT/lib/plan.sh"
 
+# shellcheck source=./preflight.sh
+source "$LWBS_ROOT/lib/preflight.sh"
+
 SELECTED_DISTRO_PROFILE=""
 
 bootstrap_main() {
@@ -179,8 +182,20 @@ bootstrap_main() {
     log_info \
         "Selected workstation profile: $workstation_profile"
 
+    if validate_profile_preflight "$workstation_profile"; then
+        :
+    else
+        exit_code=$?
+
+        log_error \
+            "Bootstrap preflight failed: profile=$workstation_profile exit_code=$exit_code"
+
+        show_failure_info
+        return "$exit_code"
+    fi
+
     if "$LWBS_DRY_RUN"; then
-        printf '\nDry-run mode enabled. No system changes will be applied.\n'
+        printf 'Dry-run mode enabled. No system changes will be applied.\n'
     fi
 
     if run_profile "$workstation_profile"; then

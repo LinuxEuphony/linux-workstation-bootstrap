@@ -8,10 +8,11 @@
 # 1. Defines application identity and version information.
 # 2. Defines runtime requirements.
 # 3. Defines supported distribution profiles.
-# 4. Defines distribution, package manager, and architecture mappings.
-# 5. Defines workstation profile defaults.
-# 6. Defines user-configuration defaults and locations.
-# 7. Defines persistent logging defaults.
+# 4. Defines supported distro and architecture combinations.
+# 5. Defines distribution, package manager, and architecture mappings.
+# 6. Defines workstation profile defaults.
+# 7. Defines user-configuration defaults and locations.
+# 8. Defines persistent logging defaults.
 
 # Application identity.
 readonly LWBS_APP_NAME="Linux Workstation Bootstrap"
@@ -36,6 +37,15 @@ declare -Ar LWBS_DISTRO_DISPLAY_NAMES=(
     ["ubuntu"]="Ubuntu"
     ["debian"]="Debian"
     ["kali"]="Kali Linux"
+)
+
+# Architectures currently supported for installation by each distribution
+# profile. Detection remains broader than installation support so unsupported
+# hosts can fail clearly during preflight.
+declare -Ar LWBS_DISTRO_SUPPORTED_ARCHITECTURES=(
+    ["ubuntu"]="amd64 arm64"
+    ["debian"]="amd64 arm64"
+    ["kali"]="amd64 arm64"
 )
 
 # Default distribution selection behaviour.
