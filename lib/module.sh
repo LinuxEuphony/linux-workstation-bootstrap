@@ -14,14 +14,15 @@
 # 4. Captures module dependencies and conflicts.
 # 5. Captures declarative external software requirements.
 # 6. Captures declarative service-state requirements.
-# 7. Resolves capabilities through the selected distro package mapping.
-# 8. Checks resolved package installation state through the distro adapter.
-# 9. Skips package requirements that are already satisfied.
-# 10. Routes missing packages through the selected distro adapter.
-# 11. Executes declared external installers through the shared framework.
-# 12. Supports optional module-specific operations.
-# 13. Supports optional module-level post-install verification.
-# 14. Preserves dry-run behaviour through shared execution utilities.
+# 7. Captures declarative managed configuration requirements.
+# 8. Resolves capabilities through the selected distro package mapping.
+# 9. Checks resolved package installation state through the distro adapter.
+# 10. Skips package requirements that are already satisfied.
+# 11. Routes missing packages through the selected distro adapter.
+# 12. Executes declared external installers through the shared framework.
+# 13. Supports optional module-specific operations.
+# 14. Supports optional module-level post-install verification.
+# 15. Preserves dry-run behaviour through shared execution utilities.
 
 LWBS_MODULE_ID=""
 LWBS_MODULE_NAME=""
@@ -33,6 +34,7 @@ declare -a LWBS_MODULE_DEPENDENCIES=()
 declare -a LWBS_MODULE_CONFLICTS=()
 declare -a LWBS_MODULE_EXTERNAL_INSTALLERS=()
 declare -a LWBS_MODULE_SERVICES=()
+declare -a LWBS_MODULE_CONFIGURATIONS=()
 
 load_module() {
     local requested_module="${1:-}"
@@ -43,6 +45,7 @@ load_module() {
     local conflict_output
     local external_output
     local service_output
+    local configuration_output
     local capability
     local dependency
     local conflict
@@ -52,11 +55,20 @@ load_module() {
     local enabled_state
     local active_state
     local restart_policy
+    local configuration_requirement
+    local configuration_id
+    local configuration_kind
+    local configuration_scope
+    local configuration_destination
+    local configuration_source
+    local configuration_mode
+    local configuration_backup
 
     local -A seen_dependencies=()
     local -A seen_conflicts=()
     local -A seen_external_installers=()
     local -A seen_services=()
+    local -A seen_configurations=()
 
     if [[ -z "$requested_module" ]]; then
         printf 'Error: no module was provided.\n' >&2
@@ -362,10 +374,59 @@ load_module() {
         done <<<"$service_output"
     fi
 
+    LWBS_MODULE_CONFIGURATIONS=()
+
+    if declare -F module_configurations >/dev/null 2>&1; then
+        if configuration_output="$(module_configurations)"; then
+            :
+        else
+            printf 'Error: unable to read configuration requirements for module: %s\n' \
+                "$requested_module" >&2
+
+            reset_module_contract
+            return 1
+        fi
+
+        while IFS= read -r configuration_requirement; do
+            [[ -z "$configuration_requirement" ]] && continue
+
+            if parse_configuration_requirement \
+                "$configuration_requirement" \
+                configuration_id \
+                configuration_kind \
+                configuration_scope \
+                configuration_destination \
+                configuration_source \
+                configuration_mode \
+                configuration_backup; then
+                :
+            else
+                printf 'Error: invalid configuration requirement in module %s.\n' \
+                    "$requested_module" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            if [[ -n "${seen_configurations[$configuration_id]+defined}" ]]; then
+                printf 'Error: duplicate managed configuration in module %s: %s\n' \
+                    "$requested_module" \
+                    "$configuration_id" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            seen_configurations["$configuration_id"]=1
+            LWBS_MODULE_CONFIGURATIONS+=("$configuration_requirement")
+        done <<<"$configuration_output"
+    fi
+
     if ((${#LWBS_MODULE_CAPABILITIES[@]} == 0 && \
         ${#LWBS_MODULE_DEPENDENCIES[@]} == 0 && \
         ${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} == 0 && \
-        ${#LWBS_MODULE_SERVICES[@]} == 0)) &&
+        ${#LWBS_MODULE_SERVICES[@]} == 0 && \
+        ${#LWBS_MODULE_CONFIGURATIONS[@]} == 0)) &&
             ! declare -F module_apply >/dev/null 2>&1 &&
             ! declare -F module_verify >/dev/null 2>&1; then
 
@@ -379,7 +440,7 @@ load_module() {
     LWBS_MODULE_PATH="$module_path"
 
     log_info \
-        "Module loaded: id=$LWBS_MODULE_ID capability_count=${#LWBS_MODULE_CAPABILITIES[@]} dependency_count=${#LWBS_MODULE_DEPENDENCIES[@]} conflict_count=${#LWBS_MODULE_CONFLICTS[@]} external_count=${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} service_count=${#LWBS_MODULE_SERVICES[@]}"
+        "Module loaded: id=$LWBS_MODULE_ID capability_count=${#LWBS_MODULE_CAPABILITIES[@]} dependency_count=${#LWBS_MODULE_DEPENDENCIES[@]} conflict_count=${#LWBS_MODULE_CONFLICTS[@]} external_count=${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} service_count=${#LWBS_MODULE_SERVICES[@]} configuration_count=${#LWBS_MODULE_CONFIGURATIONS[@]}"
 
     return 0
 }
@@ -492,8 +553,10 @@ execute_loaded_module() {
         return 1
     fi
 
-    if ((${#LWBS_MODULE_SERVICES[@]} > 0)); then
-        printf 'Error: modules with managed service requirements must execute through the planning framework.\n' \
+    if ((${#LWBS_MODULE_SERVICES[@]} > 0 || \
+        ${#LWBS_MODULE_CONFIGURATIONS[@]} > 0)); then
+
+        printf 'Error: modules with managed service or configuration requirements must execute through the planning framework.\n' \
             >&2
         return 1
     fi
@@ -559,6 +622,7 @@ reset_module_contract() {
         module_conflicts \
         module_external_installers \
         module_services \
+        module_configurations \
         module_preflight_requirements \
         module_apply \
         module_verify \
@@ -573,4 +637,5 @@ reset_module_contract() {
     LWBS_MODULE_CONFLICTS=()
     LWBS_MODULE_EXTERNAL_INSTALLERS=()
     LWBS_MODULE_SERVICES=()
+    LWBS_MODULE_CONFIGURATIONS=()
 }

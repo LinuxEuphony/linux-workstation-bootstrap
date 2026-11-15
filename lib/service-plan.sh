@@ -5,12 +5,11 @@
 #
 # Service execution-plan integration.
 #
-# This sourced library consumes plan, module, and verification state declared
-# by other bootstrap layers and exposes hooks invoked by lib/plan.sh.
-# shellcheck disable=SC2154,SC2317,SC2329
+# This sourced library consumes plan, module, configuration, and verification
+# state declared by other bootstrap layers and exposes hooks invoked by
+# lib/plan.sh.
 #
-# Keeps service-specific planning, execution, and verification logic separate
-# from the generic execution-plan orchestrator.
+# shellcheck disable=SC2154,SC2317,SC2329
 
 LWBS_PLAN_SERVICE_ACTION_COUNT=0
 
@@ -45,6 +44,10 @@ module_has_planned_changes() {
         return 0
     fi
 
+    if module_has_planned_configuration_changes "$module_id"; then
+        return 0
+    fi
+
     while IFS= read -r installer_id; do
         [[ -z "$installer_id" ]] && continue
 
@@ -76,7 +79,7 @@ module_execution_changed() {
         fi
 
         case "${LWBS_RESULT_TYPE[$result_key]:-}" in
-            package | external)
+            package | external | configuration)
                 if [[ "${LWBS_RESULT_STATUS[$result_key]:-}" == "successful" ]]; then
                     return 0
                 fi
@@ -259,12 +262,14 @@ show_module_service_plan() {
                 printf '  Service       : %s [state satisfied, skip]\n' \
                     "$service_name"
                 ;;
+
             deferred)
                 printf '  Service       : %s [configure after install: enabled=%s active=%s]\n' \
                     "$service_name" \
                     "$enabled_state" \
                     "$active_state"
                 ;;
+
             *)
                 printf '  Service       : %s [%s]\n' \
                     "$service_name" \
@@ -417,6 +422,7 @@ execute_planned_service_actions() {
                         action_performed=true
                     else
                         exit_code=$?
+
                         record_execution_result \
                             "$result_key" \
                             "service" \
@@ -424,6 +430,7 @@ execute_planned_service_actions() {
                             "$service_name" \
                             "failed" \
                             "service enable failed"
+
                         return "$exit_code"
                     fi
                 else
@@ -431,6 +438,7 @@ execute_planned_service_actions() {
                         action_performed=true
                     else
                         exit_code=$?
+
                         record_execution_result \
                             "$result_key" \
                             "service" \
@@ -438,6 +446,7 @@ execute_planned_service_actions() {
                             "$service_name" \
                             "failed" \
                             "service disable failed"
+
                         return "$exit_code"
                     fi
                 fi
@@ -465,6 +474,7 @@ execute_planned_service_actions() {
                         started=true
                     else
                         exit_code=$?
+
                         record_execution_result \
                             "$result_key" \
                             "service" \
@@ -472,6 +482,7 @@ execute_planned_service_actions() {
                             "$service_name" \
                             "failed" \
                             "service start failed"
+
                         return "$exit_code"
                     fi
                 else
@@ -479,6 +490,7 @@ execute_planned_service_actions() {
                         action_performed=true
                     else
                         exit_code=$?
+
                         record_execution_result \
                             "$result_key" \
                             "service" \
@@ -486,6 +498,7 @@ execute_planned_service_actions() {
                             "$service_name" \
                             "failed" \
                             "service stop failed"
+
                         return "$exit_code"
                     fi
                 fi
@@ -515,6 +528,7 @@ execute_planned_service_actions() {
                     action_performed=true
                 else
                     exit_code=$?
+
                     record_execution_result \
                         "$result_key" \
                         "service" \
@@ -522,6 +536,7 @@ execute_planned_service_actions() {
                         "$service_name" \
                         "failed" \
                         "service restart failed"
+
                     return "$exit_code"
                 fi
             fi

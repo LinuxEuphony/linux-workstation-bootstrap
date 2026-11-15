@@ -40,6 +40,9 @@ source "$LWBS_ROOT/lib/capability.sh"
 # shellcheck source=./external.sh
 source "$LWBS_ROOT/lib/external.sh"
 
+# shellcheck source=./configuration.sh
+source "$LWBS_ROOT/lib/configuration.sh"
+
 # shellcheck source=./module.sh
 source "$LWBS_ROOT/lib/module.sh"
 
