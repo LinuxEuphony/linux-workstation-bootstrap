@@ -10,6 +10,10 @@
 # Profile execution is delegated to the execution-plan framework so all
 # package, external software, service, and custom module actions are resolved
 # before any system-changing operation begins.
+#
+# Profiles and CLI selections provide the initial module set. The module graph
+# resolver expands dependencies, rejects conflicts, and returns the final
+# deterministic execution order.
 
 LWBS_PROFILE_ID=""
 LWBS_PROFILE_NAME=""
@@ -132,11 +136,13 @@ apply_profile_module_selection() {
     local module_id
     local requested_module
     local excluded_module
+    local exit_code
 
     local -a requested_modules=()
     local -a excluded_modules=()
     local -a selected_modules=()
     local -a final_modules=()
+    local -a resolved_modules=()
 
     local -A seen_modules=()
     local -A excluded_module_set=()
@@ -220,7 +226,21 @@ apply_profile_module_selection() {
         return 1
     fi
 
-    LWBS_PROFILE_MODULES=("${final_modules[@]}")
+    if resolve_module_graph \
+        resolved_modules \
+        final_modules \
+        excluded_modules; then
+        :
+    else
+        exit_code=$?
+
+        log_error \
+            "Module dependency resolution failed: profile=$LWBS_PROFILE_ID exit_code=$exit_code"
+
+        return "$exit_code"
+    fi
+
+    LWBS_PROFILE_MODULES=("${resolved_modules[@]}")
 
     log_info \
         "Resolved workstation profile modules: profile=$LWBS_PROFILE_ID module_count=${#LWBS_PROFILE_MODULES[@]}"
@@ -410,7 +430,6 @@ validate_profile_modules() {
     return 0
 }
 
-# Execute the currently loaded profile through the mandatory planning layer.
 execute_loaded_profile() {
     if [[ -z "$LWBS_PROFILE_ID" ]]; then
         printf 'Error: no profile is currently loaded.\n' >&2
@@ -425,7 +444,6 @@ execute_loaded_profile() {
     run_profile_execution_plan "$LWBS_PROFILE_ID"
 }
 
-# Load and execute a profile through the mandatory execution-plan workflow.
 run_profile() {
     local profile_id="${1:-}"
 
