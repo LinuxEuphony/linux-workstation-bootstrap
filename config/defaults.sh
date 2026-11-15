@@ -17,18 +17,21 @@ declare -ar LWBS_SUPPORTED_DISTROS=(
     "ubuntu"
     "debian"
     "kali"
+    "fedora"
 )
 
 declare -Ar LWBS_DISTRO_DISPLAY_NAMES=(
     ["ubuntu"]="Ubuntu"
     ["debian"]="Debian"
     ["kali"]="Kali Linux"
+    ["fedora"]="Fedora Linux"
 )
 
 declare -Ar LWBS_DISTRO_SUPPORTED_ARCHITECTURES=(
     ["ubuntu"]="amd64 arm64"
     ["debian"]="amd64 arm64"
     ["kali"]="amd64 arm64"
+    ["fedora"]="amd64 arm64"
 )
 
 readonly LWBS_DEFAULT_DISTRO_PROFILE="auto"

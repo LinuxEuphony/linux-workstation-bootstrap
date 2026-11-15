@@ -34,7 +34,7 @@ test_load_supported_adapters() {
 
     setup_test_logging "$temp_dir"
 
-    for profile in ubuntu debian kali; do
+    for profile in "${LWBS_SUPPORTED_DISTROS[@]}"; do
         LWBS_ROOT="$REPO_ROOT"
 
         load_distro_adapter "$profile"
@@ -57,8 +57,8 @@ test_reject_unsupported_adapter() {
 
     LWBS_ROOT="$REPO_ROOT"
 
-    if load_distro_adapter fedora >/dev/null 2>&1; then
-        printf 'Unsupported Fedora adapter was accepted.\n' >&2
+    if load_distro_adapter arch >/dev/null 2>&1; then
+        printf 'Unsupported Arch adapter was accepted.\n' >&2
         return 1
     fi
 
@@ -143,6 +143,16 @@ test_adapter_environment_validation_without_host_changes() {
 
         reset_distro_adapter_contract
     done
+
+    SYSTEM_DISTRO_FAMILY="rpm"
+    SYSTEM_PACKAGE_MANAGER="dnf"
+
+    LWBS_ROOT="$REPO_ROOT"
+
+    load_distro_adapter fedora
+    distro_validate_environment
+
+    reset_distro_adapter_contract
 }
 
 test_adapter_rejects_incompatible_family() {
@@ -159,15 +169,15 @@ test_adapter_rejects_incompatible_family() {
         return 0
     }
 
-    SYSTEM_DISTRO_FAMILY="rpm"
-    SYSTEM_PACKAGE_MANAGER="dnf"
+    SYSTEM_DISTRO_FAMILY="debian"
+    SYSTEM_PACKAGE_MANAGER="apt"
 
     LWBS_ROOT="$REPO_ROOT"
 
-    load_distro_adapter ubuntu
+    load_distro_adapter fedora
 
     if distro_validate_environment >/dev/null 2>&1; then
-        printf 'Ubuntu adapter accepted an RPM-family environment.\n' >&2
+        printf 'Fedora adapter accepted a Debian-family environment.\n' >&2
         return 1
     fi
 
@@ -176,6 +186,8 @@ test_adapter_rejects_incompatible_family() {
 
 test_adapter_package_install_is_safe_in_dry_run() {
     local temp_dir
+    local profile
+    local expected_command
     local output
 
     temp_dir="$(make_test_temp_dir)"
@@ -186,20 +198,37 @@ test_adapter_package_install_is_safe_in_dry_run() {
     LWBS_ROOT="$REPO_ROOT"
     LWBS_DRY_RUN=true
 
-    load_distro_adapter ubuntu
+    for profile in "${LWBS_SUPPORTED_DISTROS[@]}"; do
+        case "$profile" in
+            fedora)
+                expected_command="dnf"
+                ;;
 
-    output="$(
-        distro_install_packages \
-            lwbs-example-package
-    )"
+            *)
+                expected_command="apt-get"
+                ;;
+        esac
 
-    assert_contains \
-        "$output" \
-        "[DRY-RUN] Would execute with root privileges: apt-get"
+        load_distro_adapter "$profile"
+
+        output="$(
+            distro_install_packages \
+                lwbs-example-package
+        )"
+
+        assert_contains \
+            "$output" \
+            "[DRY-RUN] Would execute with root privileges: $expected_command"
+
+        reset_distro_adapter_contract
+    done
 }
 
 test_local_package_install_is_safe_in_dry_run() {
     local temp_dir
+    local profile
+    local package_file
+    local expected_command
     local output
 
     temp_dir="$(make_test_temp_dir)"
@@ -210,16 +239,32 @@ test_local_package_install_is_safe_in_dry_run() {
     LWBS_ROOT="$REPO_ROOT"
     LWBS_DRY_RUN=true
 
-    load_distro_adapter ubuntu
+    for profile in "${LWBS_SUPPORTED_DISTROS[@]}"; do
+        case "$profile" in
+            fedora)
+                package_file="/tmp/lwbs-example-package.rpm"
+                expected_command="dnf"
+                ;;
 
-    output="$(
-        distro_install_local_package \
-            "/tmp/lwbs-example-package.deb"
-    )"
+            *)
+                package_file="/tmp/lwbs-example-package.deb"
+                expected_command="apt-get"
+                ;;
+        esac
 
-    assert_contains \
-        "$output" \
-        "[DRY-RUN] Would execute with root privileges: apt-get"
+        load_distro_adapter "$profile"
+
+        output="$(
+            distro_install_local_package \
+                "$package_file"
+        )"
+
+        assert_contains \
+            "$output" \
+            "[DRY-RUN] Would execute with root privileges: $expected_command"
+
+        reset_distro_adapter_contract
+    done
 }
 
 run_test \
@@ -239,7 +284,7 @@ run_test \
     test_incomplete_adapter_fails_contract_validation
 
 run_test \
-    "validate Debian-family adapters without modifying the host" \
+    "validate supported distro adapters without modifying the host" \
     test_adapter_environment_validation_without_host_changes
 
 run_test \

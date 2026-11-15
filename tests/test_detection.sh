@@ -31,7 +31,7 @@ test_detect_ubuntu_fixture() {
     assert_equal "apt" "$SYSTEM_PACKAGE_MANAGER"
 }
 
-test_detect_fedora_family() {
+test_detect_fedora_fixture() {
     LWBS_OS_RELEASE_OVERRIDE="$TEST_DIR/fixtures/os-release/fedora"
     LWBS_ARCH_OVERRIDE="x86_64"
 
@@ -86,6 +86,7 @@ test_missing_os_release_fails() {
     if detect_system >/dev/null 2>&1; then
         printf 'detect_system unexpectedly accepted a missing os-release file.\n' \
             >&2
+
         return 1
     fi
 
@@ -97,8 +98,8 @@ run_test \
     test_detect_ubuntu_fixture
 
 run_test \
-    "detect Fedora family without requiring Fedora support" \
-    test_detect_fedora_family
+    "detect Fedora from controlled os-release fixture" \
+    test_detect_fedora_fixture
 
 run_test \
     "resolve distro family through ID_LIKE" \

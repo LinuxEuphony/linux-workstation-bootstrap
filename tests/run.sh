@@ -12,6 +12,7 @@ declare -a TEST_FILES=(
     "$TEST_DIR/test_config.sh"
     "$TEST_DIR/test_execution.sh"
     "$TEST_DIR/test_distro.sh"
+    "$TEST_DIR/test_fedora.sh"
     "$TEST_DIR/test_common_utilities.sh"
     "$TEST_DIR/test_development_tools.sh"
     "$TEST_DIR/test_containers_virtualization.sh"

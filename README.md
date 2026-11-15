@@ -7,7 +7,7 @@ Linux Workstation Bootstrap replaces a monolithic workstation setup script with 
 ## Features
 
 - Linux distribution, version, codename, and architecture detection
-- Ubuntu, Debian, and Kali Linux support
+- Ubuntu, Debian, Kali Linux, and Fedora Linux support
 - portable capability-to-package resolution
 - distro-specific package adapters
 - package installation-state detection
@@ -15,11 +15,19 @@ Linux Workstation Bootstrap replaces a monolithic workstation setup script with 
 - modular workstation capabilities
 - declarative workstation profiles
 - controlled external software installation
+- verified external artifact downloads
+- managed user and group membership
+- managed service lifecycle
+- managed system and user configuration
 - dry-run execution
 - execution planning and confirmation
+- interrupted-run recovery
+- concurrent execution protection
+- restart and login-session requirement tracking
 - post-install verification and execution summaries
 - user-local configuration
 - persistent execution logging
+- Semantic Versioning and release packaging
 - automated Bash tests
 - ShellCheck and shfmt validation
 - GitHub Actions CI
@@ -31,8 +39,15 @@ Linux Workstation Bootstrap replaces a monolithic workstation setup script with 
 | Ubuntu | Yes | Yes | Yes |
 | Debian | Yes | Yes | Yes |
 | Kali Linux | Yes | Yes | Yes |
+| Fedora Linux | Yes | Yes | Yes |
 
 The architecture is designed to support additional Linux distributions without adding distro-specific logic to shared workstation modules.
+
+Detailed distribution architecture is documented in:
+
+```text
+docs/distributions.md
+```
 
 ## Architecture
 
@@ -87,24 +102,33 @@ modules/
 
 Modules declare portable capabilities rather than package-manager commands or distro-specific package names.
 
-The first workstation module is:
+Examples include:
 
 ```text
 common-utilities
+development-tools
+containers-virtualization
+database-tools
+desktop-media
+security-tools
+hardware-power
 ```
 
-It currently provides:
+A capability may resolve differently on each distribution.
+
+For example:
 
 ```text
-curl
-dos2unix
-nano
-sed
-wget
-xz
+Capability: xz
+
+Ubuntu / Debian / Kali
+    xz-utils
+
+Fedora
+    xz
 ```
 
-For Debian-family distributions, for example, the portable `xz` capability resolves to the `xz-utils` package.
+The module requesting `xz` does not need to know which package name satisfies it.
 
 ## Profiles
 
@@ -122,7 +146,7 @@ Conceptually:
 developer
 ├── common-utilities
 ├── development-tools
-├── containers
+├── containers-virtualization
 └── database-tools
 ```
 
@@ -188,7 +212,17 @@ Supported installer methods include:
 - archives
 - staged installer scripts
 
-External downloads require HTTPS, and remote scripts are not piped directly into a shell.
+External downloads require integrity metadata and must be verified before installation.
+
+Supported verification methods include SHA-256 and trusted signatures.
+
+Remote scripts are not piped directly into a shell.
+
+Detailed external installer behaviour is documented in:
+
+```text
+docs/external-installers.md
+```
 
 ## Configuration
 
@@ -219,7 +253,7 @@ CLI Arguments
 Example:
 
 ```ini
-distro_profile=ubuntu
+distro_profile=fedora
 ```
 
 Supported distro profile values are:
@@ -229,6 +263,7 @@ auto
 ubuntu
 debian
 kali
+fedora
 ```
 
 User configuration is parsed as data and is never sourced as arbitrary shell code.
@@ -248,7 +283,7 @@ Run the bootstrap:
 ./bin/linux-workstation-bootstrap
 ```
 
-Available options:
+Available options include:
 
 ```text
 --distro <profile>   Use a specific distribution profile
@@ -258,15 +293,19 @@ Available options:
 -h, --help           Display help
 ```
 
-Examples:
-
-```bash
-./bin/linux-workstation-bootstrap --dry-run --yes
-```
+Preview the detected workstation:
 
 ```bash
 ./bin/linux-workstation-bootstrap \
-  --distro ubuntu \
+  --dry-run \
+  --yes
+```
+
+Preview a Fedora workstation explicitly:
+
+```bash
+./bin/linux-workstation-bootstrap \
+  --distro fedora \
   --dry-run
 ```
 
@@ -294,23 +333,33 @@ linux-workstation-bootstrap/
 ├── lib/             # Shared bootstrap infrastructure
 ├── modules/         # Reusable workstation capabilities
 ├── profiles/        # Workstation profile definitions
+├── scripts/         # Release and maintenance tooling
 ├── tests/           # Automated Bash tests
-└── README.md
+├── README.md
+└── VERSION
 ```
 
 Important shared components include:
 
 ```text
-lib/bootstrap.sh       application lifecycle
-lib/capability.sh      capability resolution
-lib/config.sh          user configuration
-lib/distro.sh          distro adapter framework
-lib/execution.sh       controlled command execution
-lib/external.sh        external installation framework
-lib/module.sh          module framework
-lib/plan.sh            execution planning
-lib/profile.sh         profile framework
-lib/verification.sh    post-install verification
+lib/account.sh        workstation user and group management
+lib/bootstrap.sh      application lifecycle
+lib/capability.sh     capability resolution
+lib/config.sh         user configuration
+lib/configuration.sh  managed configuration
+lib/distro.sh         distro adapter framework
+lib/execution.sh      controlled command execution
+lib/external.sh       external installation framework
+lib/integrity.sh      artifact integrity verification
+lib/lock.sh           concurrent execution protection
+lib/module.sh         module framework
+lib/plan.sh           execution planning
+lib/profile.sh        profile framework
+lib/recovery.sh       interrupted-run recovery
+lib/restart.sh        restart and session requirement tracking
+lib/service.sh        managed service operations
+lib/version.sh        application version handling
+lib/verification.sh   post-install verification
 ```
 
 ## Development Validation
@@ -325,24 +374,24 @@ For repository-wide shell validation:
 
 ```bash
 mapfile -d '' -t shell_files < <(
-  git ls-files -z \
-    --cached \
-    --others \
-    --exclude-standard \
-    -- '*.sh' 'bin/*'
+    git ls-files -z \
+        --cached \
+        --others \
+        --exclude-standard \
+        -- '*.sh' 'bin/*'
 )
 
 for shell_file in "${shell_files[@]}"; do
-  bash -n "$shell_file"
+    bash -n "$shell_file"
 done
 
 shellcheck -x "${shell_files[@]}"
 
 shfmt \
-  -d \
-  -i 4 \
-  -ci \
-  "${shell_files[@]}"
+    -d \
+    -i 4 \
+    -ci \
+    "${shell_files[@]}"
 
 bash tests/run.sh
 
@@ -364,26 +413,51 @@ Key safeguards include:
 - distro-specific package operations isolated in adapters
 - portable capabilities instead of package names in modules
 - safe failure on unknown installation state
+- verified external downloads
 - staged external scripts instead of `curl | sh`
+- managed account changes
+- managed service state
+- controlled configuration changes
+- interrupted-run detection
+- concurrent execution protection
+- restart and login-session requirement reporting
 - post-install verification
 - user configuration parsed as data
 - automated syntax, lint, formatting, and test validation
 
+## Releases
+
+The authoritative application version is stored in:
+
+```text
+VERSION
+```
+
+Published releases use Semantic Versioning.
+
+Release validation, packaging, checksums, and publication are documented in:
+
+```text
+docs/releases.md
+```
+
 ## Documentation
 
-Detailed design and implementation documentation belongs under:
+Detailed project documentation is maintained under:
 
 ```text
 docs/
 ```
 
-The repository already includes:
+Current documentation includes:
 
 ```text
+docs/distributions.md
+docs/external-installers.md
+docs/releases.md
 docs/testing.md
+docs/workstation-inventory.md
 ```
-
-Additional architecture and framework documentation is maintained separately from the README as those areas evolve.
 
 ## Project
 
