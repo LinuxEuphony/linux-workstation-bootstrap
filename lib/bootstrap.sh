@@ -43,6 +43,9 @@ source "$LWBS_ROOT/lib/external.sh"
 # shellcheck source=./module.sh
 source "$LWBS_ROOT/lib/module.sh"
 
+# shellcheck source=./module-graph.sh
+source "$LWBS_ROOT/lib/module-graph.sh"
+
 # shellcheck source=./profile.sh
 source "$LWBS_ROOT/lib/profile.sh"
 
@@ -228,7 +231,6 @@ select_distro_profile() {
     local confirmation_exit_code
     local selection_exit_code
 
-    # An explicit CLI distro selection has the highest precedence.
     if [[ -n "$LWBS_REQUESTED_DISTRO_PROFILE" ]]; then
         if ! is_supported_distro "$LWBS_REQUESTED_DISTRO_PROFILE"; then
             printf 'Error: unsupported distribution profile: %s\n' \
@@ -242,8 +244,6 @@ select_distro_profile() {
         return 0
     fi
 
-    # A configured distro profile is used when the user configuration does
-    # not request automatic host detection.
     if [[ -n "${LWBS_CONFIG_DISTRO_PROFILE:-}" &&
         "$LWBS_CONFIG_DISTRO_PROFILE" != "auto" ]]; then
 
@@ -259,8 +259,6 @@ select_distro_profile() {
         return 0
     fi
 
-    # Non-interactive approval uses the detected distribution when it is
-    # supported. It must not silently select another distribution.
     if "$LWBS_ASSUME_YES"; then
         if is_supported_distro "$SYSTEM_DISTRO_ID"; then
             SELECTED_DISTRO_PROFILE="$SYSTEM_DISTRO_ID"
@@ -274,7 +272,6 @@ select_distro_profile() {
         return 2
     fi
 
-    # Supported detected distributions can be confirmed interactively.
     if is_supported_distro "$SYSTEM_DISTRO_ID"; then
         if confirm_detected_profile; then
             SELECTED_DISTRO_PROFILE="$SYSTEM_DISTRO_ID"
@@ -283,16 +280,12 @@ select_distro_profile() {
         else
             confirmation_exit_code=$?
 
-            # A return code of 1 means the user declined the detected
-            # distribution and should be offered the normal selector.
             if ((confirmation_exit_code != 1)); then
                 return "$confirmation_exit_code"
             fi
         fi
     fi
 
-    # Unsupported detected distributions, or a declined detected profile,
-    # fall back to the explicit interactive selector.
     if choose_distro_profile; then
         return 0
     else

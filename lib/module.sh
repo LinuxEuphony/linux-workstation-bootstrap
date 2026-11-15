@@ -4,23 +4,24 @@
 # Author: David Kariuki
 #
 # Installation module utilities.
-# Provides the controlled interface used to load, validate, and execute
-# reusable workstation capability modules.
+# Provides the controlled interface used to load and validate reusable
+# workstation capability modules.
 #
 # This file:
 # 1. Loads workstation modules from the modules directory.
 # 2. Validates the module contract.
 # 3. Captures module metadata and capability requirements.
-# 4. Captures declarative external software requirements.
-# 5. Captures declarative service-state requirements.
-# 6. Resolves capabilities through the selected distro package mapping.
-# 7. Checks resolved package installation state through the distro adapter.
-# 8. Skips package requirements that are already satisfied.
-# 9. Routes missing packages through the selected distro adapter.
-# 10. Executes declared external installers through the shared framework.
-# 11. Supports optional module-specific operations.
-# 12. Supports optional module-level post-install verification.
-# 13. Preserves dry-run behaviour through shared execution utilities.
+# 4. Captures module dependencies and conflicts.
+# 5. Captures declarative external software requirements.
+# 6. Captures declarative service-state requirements.
+# 7. Resolves capabilities through the selected distro package mapping.
+# 8. Checks resolved package installation state through the distro adapter.
+# 9. Skips package requirements that are already satisfied.
+# 10. Routes missing packages through the selected distro adapter.
+# 11. Executes declared external installers through the shared framework.
+# 12. Supports optional module-specific operations.
+# 13. Supports optional module-level post-install verification.
+# 14. Preserves dry-run behaviour through shared execution utilities.
 
 LWBS_MODULE_ID=""
 LWBS_MODULE_NAME=""
@@ -28,6 +29,8 @@ LWBS_MODULE_DESCRIPTION=""
 LWBS_MODULE_PATH=""
 
 declare -a LWBS_MODULE_CAPABILITIES=()
+declare -a LWBS_MODULE_DEPENDENCIES=()
+declare -a LWBS_MODULE_CONFLICTS=()
 declare -a LWBS_MODULE_EXTERNAL_INSTALLERS=()
 declare -a LWBS_MODULE_SERVICES=()
 
@@ -36,9 +39,13 @@ load_module() {
     local module_directory
     local module_path
     local capability_output
+    local dependency_output
+    local conflict_output
     local external_output
     local service_output
     local capability
+    local dependency
+    local conflict
     local installer_id
     local service_requirement
     local service_name
@@ -46,6 +53,8 @@ load_module() {
     local active_state
     local restart_policy
 
+    local -A seen_dependencies=()
+    local -A seen_conflicts=()
     local -A seen_external_installers=()
     local -A seen_services=()
 
@@ -164,6 +173,109 @@ load_module() {
         LWBS_MODULE_CAPABILITIES+=("$capability")
     done <<<"$capability_output"
 
+    LWBS_MODULE_DEPENDENCIES=()
+
+    if declare -F module_dependencies >/dev/null 2>&1; then
+        if dependency_output="$(module_dependencies)"; then
+            :
+        else
+            printf 'Error: unable to read dependencies for module: %s\n' \
+                "$requested_module" >&2
+
+            reset_module_contract
+            return 1
+        fi
+
+        while IFS= read -r dependency; do
+            [[ -z "$dependency" ]] && continue
+
+            if [[ ! "$dependency" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+                printf 'Error: invalid dependency in module %s: %s\n' \
+                    "$requested_module" \
+                    "$dependency" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            if [[ "$dependency" == "$requested_module" ]]; then
+                printf 'Error: module cannot depend on itself: %s\n' \
+                    "$requested_module" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            if [[ -n "${seen_dependencies[$dependency]+defined}" ]]; then
+                printf 'Error: duplicate dependency in module %s: %s\n' \
+                    "$requested_module" \
+                    "$dependency" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            seen_dependencies["$dependency"]=1
+            LWBS_MODULE_DEPENDENCIES+=("$dependency")
+        done <<<"$dependency_output"
+    fi
+
+    LWBS_MODULE_CONFLICTS=()
+
+    if declare -F module_conflicts >/dev/null 2>&1; then
+        if conflict_output="$(module_conflicts)"; then
+            :
+        else
+            printf 'Error: unable to read conflicts for module: %s\n' \
+                "$requested_module" >&2
+
+            reset_module_contract
+            return 1
+        fi
+
+        while IFS= read -r conflict; do
+            [[ -z "$conflict" ]] && continue
+
+            if [[ ! "$conflict" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+                printf 'Error: invalid conflict in module %s: %s\n' \
+                    "$requested_module" \
+                    "$conflict" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            if [[ "$conflict" == "$requested_module" ]]; then
+                printf 'Error: module cannot conflict with itself: %s\n' \
+                    "$requested_module" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            if [[ -n "${seen_conflicts[$conflict]+defined}" ]]; then
+                printf 'Error: duplicate conflict in module %s: %s\n' \
+                    "$requested_module" \
+                    "$conflict" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            if [[ -n "${seen_dependencies[$conflict]+defined}" ]]; then
+                printf 'Error: module %s cannot both depend on and conflict with %s.\n' \
+                    "$requested_module" \
+                    "$conflict" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            seen_conflicts["$conflict"]=1
+            LWBS_MODULE_CONFLICTS+=("$conflict")
+        done <<<"$conflict_output"
+    fi
+
     LWBS_MODULE_EXTERNAL_INSTALLERS=()
 
     if declare -F module_external_installers >/dev/null 2>&1; then
@@ -251,12 +363,13 @@ load_module() {
     fi
 
     if ((${#LWBS_MODULE_CAPABILITIES[@]} == 0 && \
+        ${#LWBS_MODULE_DEPENDENCIES[@]} == 0 && \
         ${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} == 0 && \
         ${#LWBS_MODULE_SERVICES[@]} == 0)) &&
             ! declare -F module_apply >/dev/null 2>&1 &&
             ! declare -F module_verify >/dev/null 2>&1; then
 
-        printf 'Error: module %s does not declare any actions.\n' \
+        printf 'Error: module %s does not declare any actions or dependencies.\n' \
             "$requested_module" >&2
 
         reset_module_contract
@@ -266,7 +379,7 @@ load_module() {
     LWBS_MODULE_PATH="$module_path"
 
     log_info \
-        "Module loaded: id=$LWBS_MODULE_ID capability_count=${#LWBS_MODULE_CAPABILITIES[@]} external_count=${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} service_count=${#LWBS_MODULE_SERVICES[@]}"
+        "Module loaded: id=$LWBS_MODULE_ID capability_count=${#LWBS_MODULE_CAPABILITIES[@]} dependency_count=${#LWBS_MODULE_DEPENDENCIES[@]} conflict_count=${#LWBS_MODULE_CONFLICTS[@]} external_count=${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} service_count=${#LWBS_MODULE_SERVICES[@]}"
 
     return 0
 }
@@ -442,8 +555,11 @@ reset_module_contract() {
         module_name \
         module_description \
         module_capabilities \
+        module_dependencies \
+        module_conflicts \
         module_external_installers \
         module_services \
+        module_preflight_requirements \
         module_apply \
         module_verify \
         2>/dev/null || true
@@ -453,6 +569,8 @@ reset_module_contract() {
     LWBS_MODULE_DESCRIPTION=""
     LWBS_MODULE_PATH=""
     LWBS_MODULE_CAPABILITIES=()
+    LWBS_MODULE_DEPENDENCIES=()
+    LWBS_MODULE_CONFLICTS=()
     LWBS_MODULE_EXTERNAL_INSTALLERS=()
     LWBS_MODULE_SERVICES=()
 }
