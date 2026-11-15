@@ -233,6 +233,23 @@ EOF
     LWBS_DRY_RUN=true
     LWBS_ASSUME_YES=false
 
+    # Use controlled account state so the plan does not depend on whether the
+    # developer workstation or CI runner already has a docker group or group
+    # membership.
+    LWBS_TARGET_USER="test-user"
+
+    # shellcheck disable=SC2317,SC2329
+    account_user_exists() {
+        return 0
+    }
+
+    # Treat the docker group as not yet available. The planned docker package
+    # installation is expected to create it, so membership is deferred.
+    # shellcheck disable=SC2317,SC2329
+    account_group_exists() {
+        return 1
+    }
+
     # Planning needs package state but must not perform installation during
     # dry-run. Mark all requirements absent to produce a complete plan.
     # shellcheck disable=SC2317,SC2329
@@ -256,6 +273,10 @@ EOF
         "0" \
         "$LWBS_PLAN_SKIP_ACTION_COUNT"
 
+    assert_equal \
+        "1" \
+        "$LWBS_PLAN_ACCOUNT_ACTION_COUNT"
+
     assert_contains \
         "$output" \
         "Containers and Virtualization"
@@ -267,6 +288,10 @@ EOF
     assert_contains \
         "$output" \
         "open-vm-tools [install]"
+
+    assert_contains \
+        "$output" \
+        "test-user -> docker [add after module installation]"
 
     assert_contains \
         "$output" \

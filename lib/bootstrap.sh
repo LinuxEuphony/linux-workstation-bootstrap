@@ -92,7 +92,8 @@ bootstrap_main() {
     local workstation_profile
     local exit_code
 
-    if load_project_version; then
+    if load_project_version \
+        "$LWBS_ROOT/${LWBS_VERSION_FILE_NAME:-VERSION}"; then
         :
     else
         exit_code=$?
