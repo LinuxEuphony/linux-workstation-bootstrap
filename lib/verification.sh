@@ -10,7 +10,8 @@
 # 2. Distinguishes successful, skipped, failed, and unverifiable actions.
 # 3. Provides a concise final execution summary.
 # 4. Records verification results in the session log.
-# 5. Keeps result tracking separate from installation implementation.
+# 5. Updates recovery state after successfully verified actions.
+# 6. Keeps result tracking separate from installation implementation.
 
 declare -a LWBS_RESULT_KEYS=()
 
@@ -25,7 +26,6 @@ LWBS_RESULT_SKIPPED_COUNT=0
 LWBS_RESULT_FAILED_COUNT=0
 LWBS_RESULT_UNVERIFIABLE_COUNT=0
 
-# Clear all recorded execution results.
 reset_execution_results() {
     LWBS_RESULT_KEYS=()
 
@@ -41,7 +41,6 @@ reset_execution_results() {
     LWBS_RESULT_UNVERIFIABLE_COUNT=0
 }
 
-# Record one final action result.
 record_execution_result() {
     local key="${1:-}"
     local type="${2:-}"
@@ -87,12 +86,15 @@ record_execution_result() {
         successful)
             ((LWBS_RESULT_SUCCESSFUL_COUNT += 1))
             ;;
+
         skipped)
             ((LWBS_RESULT_SKIPPED_COUNT += 1))
             ;;
+
         failed)
             ((LWBS_RESULT_FAILED_COUNT += 1))
             ;;
+
         unverifiable)
             ((LWBS_RESULT_UNVERIFIABLE_COUNT += 1))
             ;;
@@ -101,10 +103,23 @@ record_execution_result() {
     log_info \
         "Execution result: type=$type module=$module_id target=$target status=$status detail=${detail:-none}"
 
+    if [[ "$status" == "successful" ]] &&
+        declare -F recovery_record_successful_action >/dev/null 2>&1; then
+
+        if recovery_record_successful_action \
+            "$type" \
+            "$module_id" \
+            "$target"; then
+            :
+        else
+            log_warning \
+                "Execution succeeded but recovery checkpoint could not be updated: type=$type module=$module_id target=$target"
+        fi
+    fi
+
     return 0
 }
 
-# Produce a stable result key for one package action.
 package_result_key() {
     local module_id="${1:-}"
     local package="${2:-}"
@@ -114,7 +129,6 @@ package_result_key() {
         "$package"
 }
 
-# Produce a stable result key for one external software action.
 external_result_key() {
     local module_id="${1:-}"
     local installer_id="${2:-}"
@@ -124,14 +138,12 @@ external_result_key() {
         "$installer_id"
 }
 
-# Produce a stable result key for module-level verification.
 module_result_key() {
     local module_id="${1:-}"
 
     printf 'module::%s\n' "$module_id"
 }
 
-# Display the final execution result.
 show_execution_summary() {
     local key
     local status
@@ -184,7 +196,6 @@ show_execution_summary() {
     printf '\n'
 }
 
-# Return success when no required verification failure was recorded.
 execution_results_are_successful() {
     ((LWBS_RESULT_FAILED_COUNT == 0))
 }

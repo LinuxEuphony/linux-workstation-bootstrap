@@ -3,10 +3,8 @@
 # Linux Workstation Bootstrap
 # Author: David Kariuki
 #
-# Execution planning, controlled execution, and post-install verification.
-#
-# A profile is fully resolved before modification. Approved actions are then
-# executed and verified before a final result is reported.
+# Execution planning, controlled execution, recovery tracking, and
+# post-install verification.
 
 LWBS_PLAN_STATUS="empty"
 
@@ -183,9 +181,11 @@ build_profile_execution_plan() {
                 :
             else
                 exit_code=$?
+
                 reset_external_installer_contract
                 reset_module_contract
                 LWBS_PLAN_STATUS="invalid"
+
                 return "$exit_code"
             fi
 
@@ -205,11 +205,27 @@ build_profile_execution_plan() {
                     LWBS_PLAN_EXTERNAL_ACTIONS["$external_key"]="skip"
                     ((LWBS_PLAN_SKIP_ACTION_COUNT += 1))
                     ;;
+
                 absent)
                     LWBS_PLAN_EXTERNAL_ACTIONS["$external_key"]="install"
                     ((LWBS_PLAN_INSTALL_ACTION_COUNT += 1))
                     ;;
             esac
+
+            if plan_external_restart_requirements \
+                "$module_id" \
+                "$installer_id" \
+                "$external_key"; then
+                :
+            else
+                exit_code=$?
+
+                reset_external_installer_contract
+                reset_module_contract
+                LWBS_PLAN_STATUS="invalid"
+
+                return "$exit_code"
+            fi
 
             reset_external_installer_contract
         done
@@ -231,8 +247,10 @@ build_profile_execution_plan() {
             :
         else
             exit_code=$?
+
             reset_module_contract
             LWBS_PLAN_STATUS="invalid"
+
             return "$exit_code"
         fi
 
@@ -240,8 +258,21 @@ build_profile_execution_plan() {
             :
         else
             exit_code=$?
+
             reset_module_contract
             LWBS_PLAN_STATUS="invalid"
+
+            return "$exit_code"
+        fi
+
+        if plan_module_restart_requirements "$module_id"; then
+            :
+        else
+            exit_code=$?
+
+            reset_module_contract
+            LWBS_PLAN_STATUS="invalid"
+
             return "$exit_code"
         fi
 
@@ -259,7 +290,7 @@ build_profile_execution_plan() {
 
 log_execution_plan() {
     log_info \
-        "Execution plan resolved: profile=$LWBS_PLAN_PROFILE_ID distro=$LWBS_PLAN_DISTRO_PROFILE modules=${#LWBS_PLAN_MODULES[@]} install_actions=$LWBS_PLAN_INSTALL_ACTION_COUNT configuration_actions=$LWBS_PLAN_CONFIGURATION_ACTION_COUNT service_actions=$LWBS_PLAN_SERVICE_ACTION_COUNT skip_actions=$LWBS_PLAN_SKIP_ACTION_COUNT custom_actions=$LWBS_PLAN_CUSTOM_ACTION_COUNT"
+        "Execution plan resolved: profile=$LWBS_PLAN_PROFILE_ID distro=$LWBS_PLAN_DISTRO_PROFILE modules=${#LWBS_PLAN_MODULES[@]} install_actions=$LWBS_PLAN_INSTALL_ACTION_COUNT configuration_actions=$LWBS_PLAN_CONFIGURATION_ACTION_COUNT service_actions=$LWBS_PLAN_SERVICE_ACTION_COUNT follow_up_requirements=$LWBS_PLAN_RESTART_REQUIREMENT_COUNT skip_actions=$LWBS_PLAN_SKIP_ACTION_COUNT custom_actions=$LWBS_PLAN_CUSTOM_ACTION_COUNT"
 }
 
 show_execution_plan() {
@@ -281,18 +312,24 @@ show_execution_plan() {
     printf '  Modules      : %d\n\n' \
         "${#LWBS_PLAN_MODULES[@]}"
 
+    show_recovery_plan_notice
+
     for module_id in "${LWBS_PLAN_MODULES[@]}"; do
         printf 'Module: %s\n' \
             "${LWBS_PLAN_MODULE_NAMES[$module_id]:-$module_id}"
 
         while IFS= read -r package; do
             [[ -z "$package" ]] && continue
-            printf '  Package      : %s [installed, skip]\n' "$package"
+
+            printf '  Package      : %s [installed, skip]\n' \
+                "$package"
         done <<<"${LWBS_PLAN_MODULE_SKIP_PACKAGES[$module_id]:-}"
 
         while IFS= read -r package; do
             [[ -z "$package" ]] && continue
-            printf '  Package      : %s [install]\n' "$package"
+
+            printf '  Package      : %s [install]\n' \
+                "$package"
         done <<<"${LWBS_PLAN_MODULE_INSTALL_PACKAGES[$module_id]:-}"
 
         while IFS= read -r installer_id; do
@@ -307,9 +344,11 @@ show_execution_plan() {
             action="${LWBS_PLAN_EXTERNAL_ACTIONS[$external_key]}"
 
             if [[ "$action" == "skip" ]]; then
-                printf '  External     : %s [installed, skip]\n' "$installer_id"
+                printf '  External     : %s [installed, skip]\n' \
+                    "$installer_id"
             else
-                printf '  External     : %s [install]\n' "$installer_id"
+                printf '  External     : %s [install]\n' \
+                    "$installer_id"
             fi
         done <<<"${LWBS_PLAN_MODULE_EXTERNALS[$module_id]:-}"
 
@@ -318,7 +357,6 @@ show_execution_plan() {
         fi
 
         show_module_configuration_plan "$module_id"
-
         show_module_service_plan "$module_id"
 
         if [[ "${LWBS_PLAN_MODULE_HAS_VERIFY[$module_id]:-false}" == "true" ]]; then
@@ -327,6 +365,8 @@ show_execution_plan() {
 
         printf '\n'
     done
+
+    show_planned_restart_requirements
 }
 
 execution_plan_has_changes() {
@@ -384,7 +424,6 @@ execute_planned_packages() {
             "$package" \
             "skipped" \
             "already installed"
-
     done <<<"${LWBS_PLAN_MODULE_SKIP_PACKAGES[$module_id]:-}"
 
     while IFS= read -r package; do
@@ -457,29 +496,25 @@ execute_planned_packages() {
         result_key="$(package_result_key "$module_id" "$package")"
 
         if package_state="$(distro_package_state "$package")"; then
-            case "$package_state" in
-                installed)
-                    record_execution_result \
-                        "$result_key" \
-                        "package" \
-                        "$module_id" \
-                        "$package" \
-                        "successful" \
-                        "verified installed"
-                    ;;
+            if [[ "$package_state" == "installed" ]]; then
+                record_execution_result \
+                    "$result_key" \
+                    "package" \
+                    "$module_id" \
+                    "$package" \
+                    "successful" \
+                    "verified installed"
+            else
+                record_execution_result \
+                    "$result_key" \
+                    "package" \
+                    "$module_id" \
+                    "$package" \
+                    "failed" \
+                    "package remained absent after installation"
 
-                absent)
-                    record_execution_result \
-                        "$result_key" \
-                        "package" \
-                        "$module_id" \
-                        "$package" \
-                        "failed" \
-                        "package remained absent after installation"
-
-                    verification_failed=true
-                    ;;
-            esac
+                verification_failed=true
+            fi
         else
             record_execution_result \
                 "$result_key" \
@@ -613,19 +648,21 @@ execute_planned_external_actions() {
         fi
 
         if current_state="$(query_external_installation_state)"; then
-            if [[ "$current_state" == "installed" ]]; then
-                record_execution_result \
-                    "$result_key" \
-                    "external" \
-                    "$module_id" \
-                    "$installer_id" \
-                    "successful" \
-                    "verified installed"
+            :
+        else
+            record_execution_result \
+                "$result_key" \
+                "external" \
+                "$module_id" \
+                "$installer_id" \
+                "unverifiable" \
+                "post-install state check failed"
 
-                reset_external_installer_contract
-                continue
-            fi
+            reset_external_installer_contract
+            return 1
+        fi
 
+        if [[ "$current_state" != "installed" ]]; then
             record_execution_result \
                 "$result_key" \
                 "external" \
@@ -643,11 +680,22 @@ execute_planned_external_actions() {
             "external" \
             "$module_id" \
             "$installer_id" \
-            "unverifiable" \
-            "post-install state check failed"
+            "successful" \
+            "verified installed"
+
+        if record_external_restart_requirements \
+            "$module_id" \
+            "$installer_id" \
+            "$external_key"; then
+            :
+        else
+            exit_code=$?
+
+            reset_external_installer_contract
+            return "$exit_code"
+        fi
 
         reset_external_installer_contract
-        return 1
     done <<<"${LWBS_PLAN_MODULE_EXTERNALS[$module_id]:-}"
 
     return 0
@@ -764,6 +812,26 @@ execute_module_verify_action() {
     fi
 }
 
+finalize_failed_execution() {
+    local original_exit_code="${1:-1}"
+
+    LWBS_PLAN_STATUS="failed"
+
+    if recovery_finalize_run failed; then
+        :
+    else
+        log_warning \
+            "Unable to finalize failed recovery lifecycle."
+    fi
+
+    recovery_clear_signal_handlers
+
+    show_execution_outcome
+    show_recovery_summary
+
+    return "$original_exit_code"
+}
+
 execute_resolved_plan() {
     local module_id
     local exit_code
@@ -775,6 +843,22 @@ execute_resolved_plan() {
     fi
 
     reset_execution_results
+    reset_recorded_restart_requirements
+
+    if recovery_begin_run \
+        "$LWBS_PLAN_PROFILE_ID" \
+        "$LWBS_PLAN_DISTRO_PROFILE"; then
+        :
+    else
+        exit_code=$?
+
+        printf 'Error: unable to initialize recovery state before execution.\n' \
+            >&2
+
+        return "$exit_code"
+    fi
+
+    recovery_install_signal_handlers
 
     LWBS_PLAN_STATUS="executing"
 
@@ -783,8 +867,7 @@ execute_resolved_plan() {
             :
         else
             exit_code=$?
-            LWBS_PLAN_STATUS="failed"
-            show_execution_summary
+            finalize_failed_execution "$exit_code"
             return "$exit_code"
         fi
 
@@ -792,8 +875,7 @@ execute_resolved_plan() {
             :
         else
             exit_code=$?
-            LWBS_PLAN_STATUS="failed"
-            show_execution_summary
+            finalize_failed_execution "$exit_code"
             return "$exit_code"
         fi
 
@@ -801,8 +883,7 @@ execute_resolved_plan() {
             :
         else
             exit_code=$?
-            LWBS_PLAN_STATUS="failed"
-            show_execution_summary
+            finalize_failed_execution "$exit_code"
             return "$exit_code"
         fi
 
@@ -810,8 +891,7 @@ execute_resolved_plan() {
             :
         else
             exit_code=$?
-            LWBS_PLAN_STATUS="failed"
-            show_execution_summary
+            finalize_failed_execution "$exit_code"
             return "$exit_code"
         fi
 
@@ -819,8 +899,7 @@ execute_resolved_plan() {
             :
         else
             exit_code=$?
-            LWBS_PLAN_STATUS="failed"
-            show_execution_summary
+            finalize_failed_execution "$exit_code"
             return "$exit_code"
         fi
 
@@ -828,20 +907,46 @@ execute_resolved_plan() {
             :
         else
             exit_code=$?
-            LWBS_PLAN_STATUS="failed"
-            show_execution_summary
+            finalize_failed_execution "$exit_code"
+            return "$exit_code"
+        fi
+
+        if record_module_restart_requirements "$module_id"; then
+            :
+        else
+            exit_code=$?
+            finalize_failed_execution "$exit_code"
             return "$exit_code"
         fi
     done
 
-    show_execution_summary
-
     if ! execution_results_are_successful; then
-        LWBS_PLAN_STATUS="failed"
+        finalize_failed_execution 1
         return 1
     fi
 
     LWBS_PLAN_STATUS="completed"
+
+    if recovery_finalize_run completed; then
+        :
+    else
+        exit_code=$?
+
+        recovery_clear_signal_handlers
+
+        log_error \
+            "Execution completed but recovery lifecycle finalization failed."
+
+        show_execution_outcome
+        show_recovery_summary
+
+        return "$exit_code"
+    fi
+
+    recovery_clear_signal_handlers
+
+    show_execution_outcome
+    show_recovery_summary
 
     log_info \
         "Execution plan completed successfully: profile=$LWBS_PLAN_PROFILE_ID"
@@ -857,7 +962,8 @@ run_profile_execution_plan() {
     if build_profile_execution_plan "$profile_id"; then
         :
     else
-        return $?
+        exit_code=$?
+        return "$exit_code"
     fi
 
     show_execution_plan
@@ -872,6 +978,7 @@ run_profile_execution_plan() {
 
     if ! execution_plan_has_changes; then
         reset_execution_results
+        reset_recorded_restart_requirements
 
         local module_id
         local package
@@ -917,7 +1024,8 @@ run_profile_execution_plan() {
 
         LWBS_PLAN_STATUS="completed"
 
-        show_execution_summary
+        show_execution_outcome
+        show_recovery_summary
 
         return 0
     fi
@@ -929,7 +1037,9 @@ run_profile_execution_plan() {
 
         if ((confirmation_exit_code == 1)); then
             LWBS_PLAN_STATUS="cancelled"
+
             printf '\nExecution cancelled. No planned changes were applied.\n'
+
             return 0
         fi
 
@@ -968,4 +1078,5 @@ reset_execution_plan() {
 
     reset_configuration_execution_plan
     reset_service_execution_plan
+    reset_planned_restart_requirements
 }
