@@ -20,14 +20,10 @@ test_supported_distros() {
     is_supported_distro ubuntu
     is_supported_distro debian
     is_supported_distro kali
+    is_supported_distro fedora
 }
 
 test_future_detectable_distros_not_yet_supported() {
-    if is_supported_distro fedora; then
-        printf 'Fedora unexpectedly appears as an implemented profile.\n' >&2
-        return 1
-    fi
-
     if is_supported_distro arch; then
         printf 'Arch unexpectedly appears as an implemented profile.\n' >&2
         return 1
@@ -86,7 +82,7 @@ run_test \
     test_supported_distros
 
 run_test \
-    "keep Fedora and Arch detectable but unsupported for installation" \
+    "keep Arch detectable but unsupported for installation" \
     test_future_detectable_distros_not_yet_supported
 
 run_test \
