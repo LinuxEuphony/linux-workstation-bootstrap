@@ -29,6 +29,9 @@ declare -a TEST_FILES=(
     "$TEST_DIR/test_recovery.sh"
     "$TEST_DIR/test_lock.sh"
     "$TEST_DIR/test_account.sh"
+    "$TEST_DIR/test_integrity.sh"
+    "$TEST_DIR/test_version.sh"
+    "$TEST_DIR/test_release.sh"
 )
 
 failed_files=0
