@@ -15,8 +15,10 @@
 # 5. Provides predictable temporary staging for downloaded artifacts.
 # 6. Provides controlled helpers for downloads, local packages, archives,
 #    repository files, and installer scripts.
-# 7. Routes commands through the shared execution layer.
-# 8. Preserves dry-run behaviour.
+# 7. Captures optional restart and session follow-up requirements.
+# 8. Supports optional installer-specific preflight requirements.
+# 9. Routes commands through the shared execution layer.
+# 10. Preserves dry-run behaviour.
 
 LWBS_EXTERNAL_ID=""
 LWBS_EXTERNAL_NAME=""
@@ -24,6 +26,8 @@ LWBS_EXTERNAL_DESCRIPTION=""
 LWBS_EXTERNAL_METHOD=""
 LWBS_EXTERNAL_PATH=""
 LWBS_EXTERNAL_STAGE_DIR=""
+
+declare -a LWBS_EXTERNAL_RESTART_REQUIREMENTS=()
 
 declare -ar LWBS_EXTERNAL_METHODS=(
     "repository"
@@ -36,6 +40,13 @@ load_external_installer() {
     local requested_installer="${1:-}"
     local installer_directory
     local installer_path
+    local restart_output
+    local restart_requirement
+    local restart_type
+    local restart_target
+    local restart_reason
+
+    local -A seen_restart_requirements=()
 
     if [[ -z "$requested_installer" ]]; then
         printf 'Error: no external installer was provided.\n' >&2
@@ -149,10 +160,54 @@ load_external_installer() {
         return 1
     fi
 
+    LWBS_EXTERNAL_RESTART_REQUIREMENTS=()
+
+    if declare -F external_restart_requirements >/dev/null 2>&1; then
+        if restart_output="$(external_restart_requirements)"; then
+            :
+        else
+            printf 'Error: unable to read restart requirements for external installer: %s\n' \
+                "$requested_installer" >&2
+
+            reset_external_installer_contract
+            return 1
+        fi
+
+        while IFS= read -r restart_requirement; do
+            [[ -z "$restart_requirement" ]] && continue
+
+            if parse_restart_requirement \
+                "$restart_requirement" \
+                restart_type \
+                restart_target \
+                restart_reason; then
+                :
+            else
+                printf 'Error: invalid restart requirement for external installer %s.\n' \
+                    "$requested_installer" >&2
+
+                reset_external_installer_contract
+                return 1
+            fi
+
+            restart_requirement="$restart_type|$restart_target|$restart_reason"
+
+            if [[ -n "${seen_restart_requirements[$restart_requirement]+defined}" ]]; then
+                continue
+            fi
+
+            seen_restart_requirements["$restart_requirement"]=1
+
+            LWBS_EXTERNAL_RESTART_REQUIREMENTS+=(
+                "$restart_requirement"
+            )
+        done <<<"$restart_output"
+    fi
+
     LWBS_EXTERNAL_PATH="$installer_path"
 
     log_info \
-        "External installer loaded: id=$LWBS_EXTERNAL_ID method=$LWBS_EXTERNAL_METHOD"
+        "External installer loaded: id=$LWBS_EXTERNAL_ID method=$LWBS_EXTERNAL_METHOD restart_requirements=${#LWBS_EXTERNAL_RESTART_REQUIREMENTS[@]}"
 
     return 0
 }
@@ -210,13 +265,6 @@ validate_external_method_contract() {
     return 0
 }
 
-# Query the current state reported by the loaded external installer.
-#
-# The installer must return one of:
-#   installed
-#   absent
-#
-# Any non-zero return code means the state could not be determined.
 query_external_installation_state() {
     local installation_state
     local exit_code
@@ -310,8 +358,6 @@ execute_loaded_external_installer() {
 
     printf '  Status      : not installed\n'
 
-    # Installation-specific requirements are evaluated only when an
-    # installation is actually necessary.
     if declare -F external_validate_environment >/dev/null 2>&1; then
         if external_validate_environment; then
             :
@@ -715,6 +761,8 @@ reset_external_installer_contract() {
         external_method \
         external_state \
         external_validate_environment \
+        external_preflight_requirements \
+        external_restart_requirements \
         external_repository_apply \
         external_package_apply \
         external_archive_apply \
@@ -727,4 +775,5 @@ reset_external_installer_contract() {
     LWBS_EXTERNAL_METHOD=""
     LWBS_EXTERNAL_PATH=""
     LWBS_EXTERNAL_STAGE_DIR=""
+    LWBS_EXTERNAL_RESTART_REQUIREMENTS=()
 }

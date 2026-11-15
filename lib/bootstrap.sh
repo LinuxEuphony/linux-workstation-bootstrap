@@ -25,6 +25,12 @@ source "$LWBS_ROOT/lib/core.sh"
 # shellcheck source=./execution.sh
 source "$LWBS_ROOT/lib/execution.sh"
 
+# shellcheck source=./recovery.sh
+source "$LWBS_ROOT/lib/recovery.sh"
+
+# shellcheck source=./restart.sh
+source "$LWBS_ROOT/lib/restart.sh"
+
 # shellcheck source=./service.sh
 source "$LWBS_ROOT/lib/service.sh"
 
@@ -100,8 +106,25 @@ bootstrap_main() {
             ;;
     esac
 
-    init_logging
+    if init_logging; then
+        :
+    else
+        return $?
+    fi
+
     show_startup_info
+
+    if recovery_detect_previous_run; then
+        :
+    else
+        exit_code=$?
+
+        log_error \
+            "Recovery state initialization failed: exit_code=$exit_code"
+
+        show_failure_info
+        return "$exit_code"
+    fi
 
     log_info "$LWBS_APP_NAME $LWBS_VERSION started."
 

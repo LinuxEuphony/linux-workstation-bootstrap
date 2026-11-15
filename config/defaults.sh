@@ -13,6 +13,7 @@
 # 6. Defines workstation profile defaults.
 # 7. Defines user-configuration defaults and locations.
 # 8. Defines persistent logging defaults.
+# 9. Defines interrupted-run recovery state defaults.
 
 # Application identity.
 readonly LWBS_APP_NAME="Linux Workstation Bootstrap"
@@ -114,7 +115,14 @@ declare -Ar LWBS_ARCH_ALIASES=(
 readonly LWBS_LOG_DIRECTORY_NAME="logs"
 readonly LWBS_LOG_FILE_PREFIX="run"
 
+# Interrupted-run recovery state.
+readonly LWBS_RECOVERY_DIRECTORY_NAME="recovery"
+readonly LWBS_RECOVERY_ACTIVE_FILE_NAME="active.state"
+readonly LWBS_RECOVERY_LAST_FILE_NAME="last-run.state"
+
 # Permissions applied to application state and log files.
 readonly LWBS_STATE_DIR_MODE="700"
 readonly LWBS_LOG_DIR_MODE="700"
 readonly LWBS_LOG_FILE_MODE="600"
+readonly LWBS_RECOVERY_DIR_MODE="700"
+readonly LWBS_RECOVERY_FILE_MODE="600"

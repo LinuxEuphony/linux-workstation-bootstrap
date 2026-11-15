@@ -25,6 +25,8 @@ declare -a TEST_FILES=(
     "$TEST_DIR/test_preflight.sh"
     "$TEST_DIR/test_module_graph.sh"
     "$TEST_DIR/test_configuration.sh"
+    "$TEST_DIR/test_restart.sh"
+    "$TEST_DIR/test_recovery.sh"
 )
 
 failed_files=0
