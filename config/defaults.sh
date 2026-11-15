@@ -14,60 +14,41 @@
 # 7. Defines user-configuration defaults and locations.
 # 8. Defines persistent logging defaults.
 # 9. Defines interrupted-run recovery state defaults.
+# 10. Defines concurrent-execution lock defaults.
 
-# Application identity.
 readonly LWBS_APP_NAME="Linux Workstation Bootstrap"
 readonly LWBS_APP_SLUG="linux-workstation-bootstrap"
 readonly LWBS_VERSION="0.1.0-dev"
 
-# Minimum supported Bash major version.
 readonly LWBS_MIN_BASH_MAJOR=5
 
-# Default source of Linux distribution information.
 readonly LWBS_OS_RELEASE_PATH="/etc/os-release"
 
-# Supported distribution profiles.
 declare -ar LWBS_SUPPORTED_DISTROS=(
     "ubuntu"
     "debian"
     "kali"
 )
 
-# Human-readable names for supported distribution profiles.
 declare -Ar LWBS_DISTRO_DISPLAY_NAMES=(
     ["ubuntu"]="Ubuntu"
     ["debian"]="Debian"
     ["kali"]="Kali Linux"
 )
 
-# Architectures currently supported for installation by each distribution
-# profile. Detection remains broader than installation support so unsupported
-# hosts can fail clearly during preflight.
 declare -Ar LWBS_DISTRO_SUPPORTED_ARCHITECTURES=(
     ["ubuntu"]="amd64 arm64"
     ["debian"]="amd64 arm64"
     ["kali"]="amd64 arm64"
 )
 
-# Default distribution selection behaviour.
-#
-# "auto" means the bootstrap should use normal host detection and
-# confirmation rather than forcing a specific distribution profile.
 readonly LWBS_DEFAULT_DISTRO_PROFILE="auto"
 
-# Default workstation profile used when the CLI does not explicitly select
-# another profile.
 readonly LWBS_DEFAULT_WORKSTATION_PROFILE="default"
 
-# User configuration location.
-#
-# The actual root is resolved from XDG_CONFIG_HOME or ~/.config at runtime.
 readonly LWBS_CONFIG_DIRECTORY_NAME="$LWBS_APP_SLUG"
 readonly LWBS_CONFIG_FILE_NAME="config.conf"
 
-# Distribution-to-family mappings.
-# Additional distributions may be detected even when they do not yet
-# have an installation profile supported by the application.
 declare -Ar LWBS_DISTRO_FAMILIES=(
     ["ubuntu"]="debian"
     ["debian"]="debian"
@@ -91,7 +72,6 @@ declare -Ar LWBS_DISTRO_FAMILIES=(
     ["sles"]="suse"
 )
 
-# Default package manager for each distribution family.
 declare -Ar LWBS_FAMILY_PACKAGE_MANAGERS=(
     ["debian"]="apt"
     ["rpm"]="dnf"
@@ -99,7 +79,6 @@ declare -Ar LWBS_FAMILY_PACKAGE_MANAGERS=(
     ["suse"]="zypper"
 )
 
-# Normalize common architecture names used by Linux distributions.
 declare -Ar LWBS_ARCH_ALIASES=(
     ["x86_64"]="amd64"
     ["aarch64"]="arm64"
@@ -111,18 +90,20 @@ declare -Ar LWBS_ARCH_ALIASES=(
     ["i686"]="i386"
 )
 
-# Persistent logging configuration.
 readonly LWBS_LOG_DIRECTORY_NAME="logs"
 readonly LWBS_LOG_FILE_PREFIX="run"
 
-# Interrupted-run recovery state.
 readonly LWBS_RECOVERY_DIRECTORY_NAME="recovery"
 readonly LWBS_RECOVERY_ACTIVE_FILE_NAME="active.state"
 readonly LWBS_RECOVERY_LAST_FILE_NAME="last-run.state"
 
-# Permissions applied to application state and log files.
+readonly LWBS_LOCK_DIRECTORY_NAME="execution.lock"
+readonly LWBS_LOCK_METADATA_FILE_NAME="owner.state"
+
 readonly LWBS_STATE_DIR_MODE="700"
 readonly LWBS_LOG_DIR_MODE="700"
 readonly LWBS_LOG_FILE_MODE="600"
 readonly LWBS_RECOVERY_DIR_MODE="700"
 readonly LWBS_RECOVERY_FILE_MODE="600"
+readonly LWBS_LOCK_DIR_MODE="700"
+readonly LWBS_LOCK_FILE_MODE="600"

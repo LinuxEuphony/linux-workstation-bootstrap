@@ -13,6 +13,7 @@
 #
 # Module contract functions are loaded and invoked indirectly by the shared
 # module framework.
+#
 # shellcheck disable=SC2317,SC2329
 
 module_id() {
@@ -34,9 +35,11 @@ module_capabilities() {
         "vmware-guest-tools"
 }
 
-# Verify that the expected container and virtualization commands are
-# available after installation. Service state and user-group membership are
-# handled separately by their dedicated frameworks.
+module_group_memberships() {
+    printf '%s\n' \
+        "docker"
+}
+
 module_verify() {
     local command_name
     local verification_failed=false

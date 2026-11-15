@@ -3,65 +3,96 @@
 # Linux Workstation Bootstrap
 # Author: David Kariuki
 #
-# Application logging utilities.
-# This file:
-# 1. Resolves the application state and log directories.
-# 2. Creates a separate log file for each bootstrap session.
-# 3. Provides consistent application log levels.
+# Application state and logging utilities.
+#
+# Application state initialization is separated from session-log creation so
+# the bootstrap can establish its execution lock before creating mutable
+# per-run logging state.
 
-# Runtime logging paths.
-# These values are populated by init_logging().
 LWBS_STATE_DIR=""
 LWBS_LOG_DIR=""
 LWBS_LOG_FILE=""
 
-# Initialize persistent logging for the current bootstrap session.
-init_logging() {
-    local state_root
-    local timestamp
-
-    # Prefer the XDG state directory when configured by the user.
+resolve_application_state_root() {
     if [[ -n "${XDG_STATE_HOME:-}" ]]; then
-        state_root="$XDG_STATE_HOME"
+        printf '%s\n' "$XDG_STATE_HOME"
+        return 0
+    fi
 
-    # Fall back to the standard user-local state location.
-    elif [[ -n "${HOME:-}" ]]; then
-        state_root="$HOME/.local/state"
+    if [[ -n "${HOME:-}" ]]; then
+        printf '%s\n' "$HOME/.local/state"
+        return 0
+    fi
 
+    printf 'Error: unable to determine the user state directory.\n' >&2
+    return 1
+}
+
+initialize_application_state() {
+    local state_root
+
+    if state_root="$(resolve_application_state_root)"; then
+        :
     else
-        printf 'Error: unable to determine the user state directory.\n' >&2
+        return $?
+    fi
+
+    LWBS_STATE_DIR="$state_root/$LWBS_APP_SLUG"
+
+    if ! mkdir -p -- "$LWBS_STATE_DIR"; then
+        printf 'Error: unable to create application state directory.\n' >&2
         return 1
     fi
 
-    # Build application-specific state and log paths from configuration.
-    LWBS_STATE_DIR="$state_root/$LWBS_APP_SLUG"
-    LWBS_LOG_DIR="$LWBS_STATE_DIR/$LWBS_LOG_DIRECTORY_NAME"
+    if ! chmod "$LWBS_STATE_DIR_MODE" -- "$LWBS_STATE_DIR"; then
+        printf 'Error: unable to secure application state directory.\n' >&2
+        return 1
+    fi
 
-    # Create persistent state directories when they do not already exist.
-    mkdir -p -- "$LWBS_LOG_DIR"
-
-    # Restrict access because logs may contain system information.
-    chmod "$LWBS_STATE_DIR_MODE" -- "$LWBS_STATE_DIR"
-    chmod "$LWBS_LOG_DIR_MODE" -- "$LWBS_LOG_DIR"
-
-    # Generate a unique timestamp for the current bootstrap session.
-    printf -v timestamp '%(%Y%m%d-%H%M%S)T' -1
-
-    # Include the process ID to avoid collisions between simultaneous runs.
-    LWBS_LOG_FILE="$LWBS_LOG_DIR/${LWBS_LOG_FILE_PREFIX}-${timestamp}-$$.log"
-
-    # Create the session log and restrict access to the current user.
-    touch -- "$LWBS_LOG_FILE"
-    chmod "$LWBS_LOG_FILE_MODE" -- "$LWBS_LOG_FILE"
+    return 0
 }
 
-# Write a timestamped message to the current session log.
+init_logging() {
+    local timestamp
+
+    if ! initialize_application_state; then
+        return 1
+    fi
+
+    LWBS_LOG_DIR="$LWBS_STATE_DIR/$LWBS_LOG_DIRECTORY_NAME"
+
+    if ! mkdir -p -- "$LWBS_LOG_DIR"; then
+        printf 'Error: unable to create application log directory.\n' >&2
+        return 1
+    fi
+
+    if ! chmod "$LWBS_LOG_DIR_MODE" -- "$LWBS_LOG_DIR"; then
+        printf 'Error: unable to secure application log directory.\n' >&2
+        return 1
+    fi
+
+    printf -v timestamp '%(%Y%m%d-%H%M%S)T' -1
+
+    LWBS_LOG_FILE="$LWBS_LOG_DIR/${LWBS_LOG_FILE_PREFIX}-${timestamp}-$$.log"
+
+    if ! touch -- "$LWBS_LOG_FILE"; then
+        printf 'Error: unable to create session log file.\n' >&2
+        return 1
+    fi
+
+    if ! chmod "$LWBS_LOG_FILE_MODE" -- "$LWBS_LOG_FILE"; then
+        printf 'Error: unable to secure session log file.\n' >&2
+        return 1
+    fi
+
+    return 0
+}
+
 log_message() {
     local level="$1"
     local message="$2"
     local timestamp
 
-    # Logging must be initialized before messages can be written.
     if [[ -z "$LWBS_LOG_FILE" ]]; then
         printf 'Error: logging has not been initialized.\n' >&2
         return 1
@@ -75,17 +106,14 @@ log_message() {
         "$message" >>"$LWBS_LOG_FILE"
 }
 
-# Write an informational event to the session log.
 log_info() {
     log_message "INFO" "$1"
 }
 
-# Write a warning event to the session log.
 log_warning() {
     log_message "WARN" "$1"
 }
 
-# Write an error event to the session log.
 log_error() {
     log_message "ERROR" "$1"
 }
