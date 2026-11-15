@@ -4,21 +4,10 @@
 # Author: David Kariuki
 #
 # Default application configuration.
-# This file:
-# 1. Defines application identity and version information.
-# 2. Defines runtime requirements.
-# 3. Defines supported distribution profiles.
-# 4. Defines supported distro and architecture combinations.
-# 5. Defines distribution, package manager, and architecture mappings.
-# 6. Defines workstation profile defaults.
-# 7. Defines user-configuration defaults and locations.
-# 8. Defines persistent logging defaults.
-# 9. Defines interrupted-run recovery state defaults.
-# 10. Defines concurrent-execution lock defaults.
 
 readonly LWBS_APP_NAME="Linux Workstation Bootstrap"
 readonly LWBS_APP_SLUG="linux-workstation-bootstrap"
-readonly LWBS_VERSION="0.1.0-dev"
+readonly LWBS_VERSION_FILE_NAME="VERSION"
 
 readonly LWBS_MIN_BASH_MAJOR=5
 
@@ -43,7 +32,6 @@ declare -Ar LWBS_DISTRO_SUPPORTED_ARCHITECTURES=(
 )
 
 readonly LWBS_DEFAULT_DISTRO_PROFILE="auto"
-
 readonly LWBS_DEFAULT_WORKSTATION_PROFILE="default"
 
 readonly LWBS_CONFIG_DIRECTORY_NAME="$LWBS_APP_SLUG"

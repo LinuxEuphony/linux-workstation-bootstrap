@@ -1,0 +1,104 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Validate and Publish Release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Install shell validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install \
+            --yes \
+            --no-install-recommends \
+            shellcheck \
+            shfmt
+
+      - name: Validate release tag and version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash scripts/release/validate-release.sh "$GITHUB_REF_NAME"
+
+      - name: Validate Bash syntax
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          mapfile -d '' -t shell_files < <(
+            git ls-files -z -- '*.sh' 'bin/*'
+          )
+
+          for shell_file in "${shell_files[@]}"; do
+            bash -n "$shell_file"
+          done
+
+      - name: Run ShellCheck
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          mapfile -d '' -t shell_files < <(
+            git ls-files -z -- '*.sh' 'bin/*'
+          )
+
+          shellcheck -x "${shell_files[@]}"
+
+      - name: Validate shell formatting
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          mapfile -d '' -t shell_files < <(
+            git ls-files -z -- '*.sh' 'bin/*'
+          )
+
+          shfmt \
+            -d \
+            -i 4 \
+            -ci \
+            "${shell_files[@]}"
+
+      - name: Run bootstrap tests
+        run: bash tests/run.sh
+
+      - name: Build release archive
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash scripts/release/package-release.sh "$PWD/dist"
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          gh release create \
+            "$GITHUB_REF_NAME" \
+            dist/*.tar.gz \
+            dist/*.sha256 \
+            --verify-tag \
+            --generate-notes \
+            --title "$GITHUB_REF_NAME"

@@ -3,8 +3,7 @@
 # Linux Workstation Bootstrap
 # Author: David Kariuki
 #
-# Execution planning, controlled execution, recovery tracking, account
-# management, restart tracking, and post-install verification.
+# Execution planning and controlled execution.
 
 LWBS_PLAN_STATUS="empty"
 
@@ -24,6 +23,7 @@ declare -A LWBS_PLAN_MODULE_INSTALL_PACKAGES=()
 declare -A LWBS_PLAN_MODULE_SKIP_PACKAGES=()
 declare -A LWBS_PLAN_MODULE_EXTERNALS=()
 declare -A LWBS_PLAN_EXTERNAL_ACTIONS=()
+declare -A LWBS_PLAN_EXTERNAL_VERIFICATIONS=()
 declare -A LWBS_PLAN_MODULE_HAS_APPLY=()
 declare -A LWBS_PLAN_MODULE_HAS_VERIFY=()
 
@@ -55,6 +55,7 @@ build_profile_execution_plan() {
     local installer_id
     local installer_state
     local external_key
+    local artifact_id
     local exit_code
 
     local -a resolved_packages=()
@@ -64,18 +65,11 @@ build_profile_execution_plan() {
     LWBS_PLAN_STATUS="building"
 
     if [[ -z "$requested_profile" ]]; then
-        printf 'Error: no workstation profile was provided for execution planning.\n' \
-            >&2
-
-        LWBS_PLAN_STATUS="invalid"
         return 2
     fi
 
     if [[ -z "${DISTRO_ADAPTER_PROFILE:-}" ||
         -z "${LWBS_CAPABILITY_PROFILE:-}" ]]; then
-
-        printf 'Error: distro adapter and capability mapping must be loaded before planning.\n' \
-            >&2
 
         LWBS_PLAN_STATUS="invalid"
         return 1
@@ -122,8 +116,10 @@ build_profile_execution_plan() {
                 :
             else
                 exit_code=$?
+
                 reset_module_contract
                 LWBS_PLAN_STATUS="invalid"
+
                 return "$exit_code"
             fi
 
@@ -132,8 +128,10 @@ build_profile_execution_plan() {
                     :
                 else
                     exit_code=$?
+
                     reset_module_contract
                     LWBS_PLAN_STATUS="invalid"
+
                     return "$exit_code"
                 fi
 
@@ -170,8 +168,10 @@ build_profile_execution_plan() {
                 :
             else
                 exit_code=$?
+
                 reset_module_contract
                 LWBS_PLAN_STATUS="invalid"
+
                 return "$exit_code"
             fi
 
@@ -210,6 +210,13 @@ build_profile_execution_plan() {
                     ;;
             esac
 
+            for artifact_id in "${LWBS_EXTERNAL_INTEGRITY_IDS[@]}"; do
+                append_execution_plan_value \
+                    LWBS_PLAN_EXTERNAL_VERIFICATIONS \
+                    "$external_key" \
+                    "$artifact_id|${LWBS_EXTERNAL_INTEGRITY_METHODS[$artifact_id]}"
+            done
+
             if plan_external_restart_requirements \
                 "$module_id" \
                 "$installer_id" \
@@ -245,10 +252,8 @@ build_profile_execution_plan() {
             :
         else
             exit_code=$?
-
             reset_module_contract
             LWBS_PLAN_STATUS="invalid"
-
             return "$exit_code"
         fi
 
@@ -256,10 +261,8 @@ build_profile_execution_plan() {
             :
         else
             exit_code=$?
-
             reset_module_contract
             LWBS_PLAN_STATUS="invalid"
-
             return "$exit_code"
         fi
 
@@ -267,10 +270,8 @@ build_profile_execution_plan() {
             :
         else
             exit_code=$?
-
             reset_module_contract
             LWBS_PLAN_STATUS="invalid"
-
             return "$exit_code"
         fi
 
@@ -278,10 +279,8 @@ build_profile_execution_plan() {
             :
         else
             exit_code=$?
-
             reset_module_contract
             LWBS_PLAN_STATUS="invalid"
-
             return "$exit_code"
         fi
 
@@ -307,6 +306,9 @@ show_execution_plan() {
     local package
     local installer_id
     local external_key
+    local verification_requirement
+    local artifact_id
+    local verification_method
 
     printf '\nExecution plan\n\n'
 
@@ -358,6 +360,18 @@ show_execution_plan() {
             else
                 printf '  External      : %s [install]\n' \
                     "$installer_id"
+
+                while IFS= read -r verification_requirement; do
+                    [[ -z "$verification_requirement" ]] && continue
+
+                    IFS='|' read -r \
+                        artifact_id \
+                        verification_method <<<"$verification_requirement"
+
+                    printf '  Verification  : %s [%s]\n' \
+                        "$artifact_id" \
+                        "$verification_method"
+                done <<<"${LWBS_PLAN_EXTERNAL_VERIFICATIONS[$external_key]:-}"
             fi
         done <<<"${LWBS_PLAN_MODULE_EXTERNALS[$module_id]:-}"
 
@@ -380,11 +394,11 @@ show_execution_plan() {
 }
 
 execution_plan_has_changes() {
-    ((LWBS_PLAN_INSTALL_ACTION_COUNT > 0 ||
-        LWBS_PLAN_CUSTOM_ACTION_COUNT > 0 ||
-        LWBS_PLAN_CONFIGURATION_ACTION_COUNT > 0 ||
-        LWBS_PLAN_ACCOUNT_ACTION_COUNT > 0 ||
-        LWBS_PLAN_SERVICE_ACTION_COUNT > 0))
+    ((LWBS_PLAN_INSTALL_ACTION_COUNT > 0 || \
+    LWBS_PLAN_CUSTOM_ACTION_COUNT > 0 || \
+    LWBS_PLAN_CONFIGURATION_ACTION_COUNT > 0 || \
+    LWBS_PLAN_ACCOUNT_ACTION_COUNT > 0 || \
+    LWBS_PLAN_SERVICE_ACTION_COUNT > 0))
 }
 
 execute_planned_packages() {
@@ -631,6 +645,7 @@ execute_planned_external_actions() {
             :
         else
             exit_code=$?
+
             reset_external_installer_contract
             return "$exit_code"
         fi
@@ -686,7 +701,9 @@ execute_module_verify_action() {
     local has_apply="${LWBS_PLAN_MODULE_HAS_APPLY[$module_id]:-false}"
     local has_verify="${LWBS_PLAN_MODULE_HAS_VERIFY[$module_id]:-false}"
 
-    if [[ "$has_apply" != "true" && "$has_verify" != "true" ]]; then
+    if [[ "$has_apply" != "true" &&
+        "$has_verify" != "true" ]]; then
+
         return 0
     fi
 
@@ -993,6 +1010,7 @@ reset_execution_plan() {
     LWBS_PLAN_MODULE_SKIP_PACKAGES=()
     LWBS_PLAN_MODULE_EXTERNALS=()
     LWBS_PLAN_EXTERNAL_ACTIONS=()
+    LWBS_PLAN_EXTERNAL_VERIFICATIONS=()
     LWBS_PLAN_MODULE_HAS_APPLY=()
     LWBS_PLAN_MODULE_HAS_VERIFY=()
 

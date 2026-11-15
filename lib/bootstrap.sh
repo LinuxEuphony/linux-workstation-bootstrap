@@ -4,11 +4,12 @@
 # Author: David Kariuki
 #
 # Main application bootstrap.
-# Coordinates the shared bootstrap layers without embedding distribution-
-# specific installation logic in the application entry flow.
 
 # shellcheck source=../config/defaults.sh
 source "$LWBS_ROOT/config/defaults.sh"
+
+# shellcheck source=./version.sh
+source "$LWBS_ROOT/lib/version.sh"
 
 # shellcheck source=./config.sh
 source "$LWBS_ROOT/lib/config.sh"
@@ -49,6 +50,9 @@ source "$LWBS_ROOT/lib/distro.sh"
 # shellcheck source=./capability.sh
 source "$LWBS_ROOT/lib/capability.sh"
 
+# shellcheck source=./integrity.sh
+source "$LWBS_ROOT/lib/integrity.sh"
+
 # shellcheck source=./external.sh
 source "$LWBS_ROOT/lib/external.sh"
 
@@ -87,6 +91,13 @@ SELECTED_DISTRO_PROFILE=""
 bootstrap_main() {
     local workstation_profile
     local exit_code
+
+    if load_project_version; then
+        :
+    else
+        exit_code=$?
+        return "$exit_code"
+    fi
 
     clear_screen
 

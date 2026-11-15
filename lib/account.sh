@@ -493,8 +493,7 @@ execute_planned_group_memberships() {
                 return 1
                 ;;
 
-            add | deferred)
-                ;;
+            add | deferred) ;;
         esac
 
         if usermod_command="$(account_usermod_command)"; then
