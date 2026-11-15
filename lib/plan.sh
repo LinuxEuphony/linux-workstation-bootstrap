@@ -227,6 +227,15 @@ build_profile_execution_plan() {
             LWBS_PLAN_MODULE_HAS_VERIFY["$module_id"]="false"
         fi
 
+        if plan_module_configurations "$module_id"; then
+            :
+        else
+            exit_code=$?
+            reset_module_contract
+            LWBS_PLAN_STATUS="invalid"
+            return "$exit_code"
+        fi
+
         if plan_module_services "$module_id"; then
             :
         else
@@ -250,7 +259,7 @@ build_profile_execution_plan() {
 
 log_execution_plan() {
     log_info \
-        "Execution plan resolved: profile=$LWBS_PLAN_PROFILE_ID distro=$LWBS_PLAN_DISTRO_PROFILE modules=${#LWBS_PLAN_MODULES[@]} install_actions=$LWBS_PLAN_INSTALL_ACTION_COUNT service_actions=$LWBS_PLAN_SERVICE_ACTION_COUNT skip_actions=$LWBS_PLAN_SKIP_ACTION_COUNT custom_actions=$LWBS_PLAN_CUSTOM_ACTION_COUNT"
+        "Execution plan resolved: profile=$LWBS_PLAN_PROFILE_ID distro=$LWBS_PLAN_DISTRO_PROFILE modules=${#LWBS_PLAN_MODULES[@]} install_actions=$LWBS_PLAN_INSTALL_ACTION_COUNT configuration_actions=$LWBS_PLAN_CONFIGURATION_ACTION_COUNT service_actions=$LWBS_PLAN_SERVICE_ACTION_COUNT skip_actions=$LWBS_PLAN_SKIP_ACTION_COUNT custom_actions=$LWBS_PLAN_CUSTOM_ACTION_COUNT"
 }
 
 show_execution_plan() {
@@ -304,11 +313,13 @@ show_execution_plan() {
             fi
         done <<<"${LWBS_PLAN_MODULE_EXTERNALS[$module_id]:-}"
 
-        show_module_service_plan "$module_id"
-
         if [[ "${LWBS_PLAN_MODULE_HAS_APPLY[$module_id]:-false}" == "true" ]]; then
             printf '  Custom action: module_apply\n'
         fi
+
+        show_module_configuration_plan "$module_id"
+
+        show_module_service_plan "$module_id"
 
         if [[ "${LWBS_PLAN_MODULE_HAS_VERIFY[$module_id]:-false}" == "true" ]]; then
             printf '  Post-check   : module_verify\n'
@@ -321,6 +332,7 @@ show_execution_plan() {
 execution_plan_has_changes() {
     ((LWBS_PLAN_INSTALL_ACTION_COUNT > 0 || \
     LWBS_PLAN_CUSTOM_ACTION_COUNT > 0 || \
+    LWBS_PLAN_CONFIGURATION_ACTION_COUNT > 0 || \
     LWBS_PLAN_SERVICE_ACTION_COUNT > 0))
 }
 
@@ -641,15 +653,12 @@ execute_planned_external_actions() {
     return 0
 }
 
-execute_and_verify_module_action() {
+execute_module_apply_action() {
     local module_id="${1:-}"
     local result_key
     local exit_code
 
-    local has_apply="${LWBS_PLAN_MODULE_HAS_APPLY[$module_id]:-false}"
-    local has_verify="${LWBS_PLAN_MODULE_HAS_VERIFY[$module_id]:-false}"
-
-    if [[ "$has_apply" != "true" && "$has_verify" != "true" ]]; then
+    if [[ "${LWBS_PLAN_MODULE_HAS_APPLY[$module_id]:-false}" != "true" ]]; then
         return 0
     fi
 
@@ -669,39 +678,77 @@ execute_and_verify_module_action() {
         return 1
     fi
 
-    if [[ "$has_apply" == "true" ]]; then
-        if module_apply; then
-            :
-        else
-            exit_code=$?
+    if module_apply; then
+        reset_module_contract
+        return 0
+    else
+        exit_code=$?
 
-            record_execution_result \
-                "$result_key" \
-                "module" \
-                "$module_id" \
-                "$module_id" \
-                "failed" \
-                "module_apply failed"
+        record_execution_result \
+            "$result_key" \
+            "module" \
+            "$module_id" \
+            "$module_id" \
+            "failed" \
+            "module_apply failed"
 
-            reset_module_contract
-            return "$exit_code"
-        fi
+        reset_module_contract
+        return "$exit_code"
+    fi
+}
+
+execute_module_verify_action() {
+    local module_id="${1:-}"
+    local result_key
+    local exit_code
+
+    local has_apply="${LWBS_PLAN_MODULE_HAS_APPLY[$module_id]:-false}"
+    local has_verify="${LWBS_PLAN_MODULE_HAS_VERIFY[$module_id]:-false}"
+
+    if [[ "$has_apply" != "true" && "$has_verify" != "true" ]]; then
+        return 0
     fi
 
-    if [[ "$has_verify" == "true" ]]; then
-        if module_verify; then
-            record_execution_result \
-                "$result_key" \
-                "module" \
-                "$module_id" \
-                "$module_id" \
-                "successful" \
-                "module verification passed"
+    result_key="$(module_result_key "$module_id")"
 
-            reset_module_contract
-            return 0
-        fi
+    if [[ "$has_verify" != "true" ]]; then
+        record_execution_result \
+            "$result_key" \
+            "module" \
+            "$module_id" \
+            "$module_id" \
+            "unverifiable" \
+            "module has no verification hook"
 
+        return 0
+    fi
+
+    if load_module "$module_id"; then
+        :
+    else
+        record_execution_result \
+            "$result_key" \
+            "module" \
+            "$module_id" \
+            "$module_id" \
+            "failed" \
+            "module could not be reloaded for verification"
+
+        return 1
+    fi
+
+    if module_verify; then
+        record_execution_result \
+            "$result_key" \
+            "module" \
+            "$module_id" \
+            "$module_id" \
+            "successful" \
+            "module verification passed"
+
+        reset_module_contract
+        return 0
+    else
         exit_code=$?
 
         record_execution_result \
@@ -715,18 +762,6 @@ execute_and_verify_module_action() {
         reset_module_contract
         return "$exit_code"
     fi
-
-    record_execution_result \
-        "$result_key" \
-        "module" \
-        "$module_id" \
-        "$module_id" \
-        "unverifiable" \
-        "module has no verification hook"
-
-    reset_module_contract
-
-    return 0
 }
 
 execute_resolved_plan() {
@@ -762,7 +797,16 @@ execute_resolved_plan() {
             return "$exit_code"
         fi
 
-        if execute_and_verify_module_action "$module_id"; then
+        if execute_module_apply_action "$module_id"; then
+            :
+        else
+            exit_code=$?
+            LWBS_PLAN_STATUS="failed"
+            show_execution_summary
+            return "$exit_code"
+        fi
+
+        if execute_planned_configuration_actions "$module_id"; then
             :
         else
             exit_code=$?
@@ -772,6 +816,15 @@ execute_resolved_plan() {
         fi
 
         if execute_planned_service_actions "$module_id"; then
+            :
+        else
+            exit_code=$?
+            LWBS_PLAN_STATUS="failed"
+            show_execution_summary
+            return "$exit_code"
+        fi
+
+        if execute_module_verify_action "$module_id"; then
             :
         else
             exit_code=$?
@@ -820,8 +873,6 @@ run_profile_execution_plan() {
     if ! execution_plan_has_changes; then
         reset_execution_results
 
-        # Record actions that were already satisfied even when no execution
-        # was required.
         local module_id
         local package
         local installer_id
@@ -860,6 +911,7 @@ run_profile_execution_plan() {
                     "already installed"
             done <<<"${LWBS_PLAN_MODULE_EXTERNALS[$module_id]:-}"
 
+            record_skipped_configuration_results "$module_id"
             record_skipped_service_results "$module_id"
         done
 
@@ -914,5 +966,6 @@ reset_execution_plan() {
     LWBS_PLAN_MODULE_HAS_APPLY=()
     LWBS_PLAN_MODULE_HAS_VERIFY=()
 
+    reset_configuration_execution_plan
     reset_service_execution_plan
 }

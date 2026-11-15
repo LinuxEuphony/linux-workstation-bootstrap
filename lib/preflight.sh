@@ -151,9 +151,6 @@ preflight_check_distro_adapter() {
         return 0
     fi
 
-    # Revalidate the adapter environment against the final resolved plan.
-    # Current distro adapters verify the required package-management commands
-    # and expected package-manager family without modifying the system.
     if distro_validate_environment; then
         :
     else
@@ -254,6 +251,10 @@ preflight_plan_requires_privilege() {
             return 0
         fi
     done
+
+    if configuration_plan_requires_privilege; then
+        return 0
+    fi
 
     return 1
 }
@@ -675,8 +676,6 @@ validate_profile_preflight() {
         exit_code=$?
     fi
 
-    # Preflight resolution is read-only. Reset the temporary resolved plan so
-    # normal execution planning begins from a clean state afterward.
     reset_execution_plan
 
     return "$exit_code"
