@@ -6,23 +6,6 @@
 # Installation module utilities.
 # Provides the controlled interface used to load and validate reusable
 # workstation capability modules.
-#
-# This file:
-# 1. Loads workstation modules from the modules directory.
-# 2. Validates the module contract.
-# 3. Captures module metadata and capability requirements.
-# 4. Captures module dependencies and conflicts.
-# 5. Captures declarative external software requirements.
-# 6. Captures declarative service-state requirements.
-# 7. Captures declarative managed configuration requirements.
-# 8. Resolves capabilities through the selected distro package mapping.
-# 9. Checks resolved package installation state through the distro adapter.
-# 10. Skips package requirements that are already satisfied.
-# 11. Routes missing packages through the selected distro adapter.
-# 12. Executes declared external installers through the shared framework.
-# 13. Supports optional module-specific operations.
-# 14. Supports optional module-level post-install verification.
-# 15. Preserves dry-run behaviour through shared execution utilities.
 
 LWBS_MODULE_ID=""
 LWBS_MODULE_NAME=""
@@ -35,6 +18,8 @@ declare -a LWBS_MODULE_CONFLICTS=()
 declare -a LWBS_MODULE_EXTERNAL_INSTALLERS=()
 declare -a LWBS_MODULE_SERVICES=()
 declare -a LWBS_MODULE_CONFIGURATIONS=()
+declare -a LWBS_MODULE_GROUP_MEMBERSHIPS=()
+declare -a LWBS_MODULE_RESTART_REQUIREMENTS=()
 
 load_module() {
     local requested_module="${1:-}"
@@ -46,6 +31,9 @@ load_module() {
     local external_output
     local service_output
     local configuration_output
+    local group_output
+    local restart_output
+
     local capability
     local dependency
     local conflict
@@ -55,6 +43,7 @@ load_module() {
     local enabled_state
     local active_state
     local restart_policy
+
     local configuration_requirement
     local configuration_id
     local configuration_kind
@@ -64,11 +53,20 @@ load_module() {
     local configuration_mode
     local configuration_backup
 
+    local group_name
+
+    local restart_requirement
+    local restart_type
+    local restart_target
+    local restart_reason
+
     local -A seen_dependencies=()
     local -A seen_conflicts=()
     local -A seen_external_installers=()
     local -A seen_services=()
     local -A seen_configurations=()
+    local -A seen_groups=()
+    local -A seen_restart_requirements=()
 
     if [[ -z "$requested_module" ]]; then
         printf 'Error: no module was provided.\n' >&2
@@ -80,9 +78,6 @@ load_module() {
         printf 'Error: invalid module ID: %s\n' \
             "$requested_module" >&2
 
-        log_error \
-            "Invalid module ID requested: $requested_module"
-
         return 2
     fi
 
@@ -92,9 +87,6 @@ load_module() {
     if [[ ! -r "$module_path" ]]; then
         printf 'Error: module not found: %s\n' \
             "$module_path" >&2
-
-        log_error \
-            "Module file not found: module=$requested_module path=$module_path"
 
         return 1
     fi
@@ -108,17 +100,11 @@ load_module() {
         printf 'Error: failed to load module: %s\n' \
             "$requested_module" >&2
 
-        log_error \
-            "Module source failed: module=$requested_module path=$module_path"
-
         reset_module_contract
         return 1
     fi
 
     if ! validate_module_contract; then
-        log_error \
-            "Module contract validation failed: $requested_module"
-
         reset_module_contract
         return 1
     fi
@@ -127,31 +113,12 @@ load_module() {
     LWBS_MODULE_NAME="$(module_name)"
     LWBS_MODULE_DESCRIPTION="$(module_description)"
 
-    if [[ -z "$LWBS_MODULE_ID" ]]; then
-        printf 'Error: module returned an empty module ID.\n' >&2
-        reset_module_contract
-        return 1
-    fi
+    if [[ -z "$LWBS_MODULE_ID" ||
+        "$LWBS_MODULE_ID" != "$requested_module" ||
+        -z "$LWBS_MODULE_NAME" ||
+        -z "$LWBS_MODULE_DESCRIPTION" ]]; then
 
-    if [[ "$LWBS_MODULE_ID" != "$requested_module" ]]; then
-        printf 'Error: module ID mismatch: requested %s, module declared %s\n' \
-            "$requested_module" \
-            "$LWBS_MODULE_ID" >&2
-
-        reset_module_contract
-        return 1
-    fi
-
-    if [[ -z "$LWBS_MODULE_NAME" ]]; then
-        printf 'Error: module returned an empty display name: %s\n' \
-            "$requested_module" >&2
-
-        reset_module_contract
-        return 1
-    fi
-
-    if [[ -z "$LWBS_MODULE_DESCRIPTION" ]]; then
-        printf 'Error: module returned an empty description: %s\n' \
+        printf 'Error: invalid module metadata: %s\n' \
             "$requested_module" >&2
 
         reset_module_contract
@@ -161,9 +128,6 @@ load_module() {
     if capability_output="$(module_capabilities)"; then
         :
     else
-        printf 'Error: unable to read capability requirements for module: %s\n' \
-            "$requested_module" >&2
-
         reset_module_contract
         return 1
     fi
@@ -191,9 +155,6 @@ load_module() {
         if dependency_output="$(module_dependencies)"; then
             :
         else
-            printf 'Error: unable to read dependencies for module: %s\n' \
-                "$requested_module" >&2
-
             reset_module_contract
             return 1
         fi
@@ -201,25 +162,11 @@ load_module() {
         while IFS= read -r dependency; do
             [[ -z "$dependency" ]] && continue
 
-            if [[ ! "$dependency" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+            if [[ ! "$dependency" =~ ^[a-z0-9][a-z0-9_-]*$ ||
+                "$dependency" == "$requested_module" ||
+                -n "${seen_dependencies[$dependency]+defined}" ]]; then
+
                 printf 'Error: invalid dependency in module %s: %s\n' \
-                    "$requested_module" \
-                    "$dependency" >&2
-
-                reset_module_contract
-                return 1
-            fi
-
-            if [[ "$dependency" == "$requested_module" ]]; then
-                printf 'Error: module cannot depend on itself: %s\n' \
-                    "$requested_module" >&2
-
-                reset_module_contract
-                return 1
-            fi
-
-            if [[ -n "${seen_dependencies[$dependency]+defined}" ]]; then
-                printf 'Error: duplicate dependency in module %s: %s\n' \
                     "$requested_module" \
                     "$dependency" >&2
 
@@ -238,9 +185,6 @@ load_module() {
         if conflict_output="$(module_conflicts)"; then
             :
         else
-            printf 'Error: unable to read conflicts for module: %s\n' \
-                "$requested_module" >&2
-
             reset_module_contract
             return 1
         fi
@@ -248,34 +192,12 @@ load_module() {
         while IFS= read -r conflict; do
             [[ -z "$conflict" ]] && continue
 
-            if [[ ! "$conflict" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
+            if [[ ! "$conflict" =~ ^[a-z0-9][a-z0-9_-]*$ ||
+                "$conflict" == "$requested_module" ||
+                -n "${seen_conflicts[$conflict]+defined}" ||
+                -n "${seen_dependencies[$conflict]+defined}" ]]; then
+
                 printf 'Error: invalid conflict in module %s: %s\n' \
-                    "$requested_module" \
-                    "$conflict" >&2
-
-                reset_module_contract
-                return 1
-            fi
-
-            if [[ "$conflict" == "$requested_module" ]]; then
-                printf 'Error: module cannot conflict with itself: %s\n' \
-                    "$requested_module" >&2
-
-                reset_module_contract
-                return 1
-            fi
-
-            if [[ -n "${seen_conflicts[$conflict]+defined}" ]]; then
-                printf 'Error: duplicate conflict in module %s: %s\n' \
-                    "$requested_module" \
-                    "$conflict" >&2
-
-                reset_module_contract
-                return 1
-            fi
-
-            if [[ -n "${seen_dependencies[$conflict]+defined}" ]]; then
-                printf 'Error: module %s cannot both depend on and conflict with %s.\n' \
                     "$requested_module" \
                     "$conflict" >&2
 
@@ -294,9 +216,6 @@ load_module() {
         if external_output="$(module_external_installers)"; then
             :
         else
-            printf 'Error: unable to read external installer requirements for module: %s\n' \
-                "$requested_module" >&2
-
             reset_module_contract
             return 1
         fi
@@ -304,17 +223,10 @@ load_module() {
         while IFS= read -r installer_id; do
             [[ -z "$installer_id" ]] && continue
 
-            if [[ ! "$installer_id" =~ ^[a-z0-9][a-z0-9_-]*$ ]]; then
-                printf 'Error: invalid external installer ID in module %s: %s\n' \
-                    "$requested_module" \
-                    "$installer_id" >&2
+            if [[ ! "$installer_id" =~ ^[a-z0-9][a-z0-9_-]*$ ||
+                -n "${seen_external_installers[$installer_id]+defined}" ]]; then
 
-                reset_module_contract
-                return 1
-            fi
-
-            if [[ -n "${seen_external_installers[$installer_id]+defined}" ]]; then
-                printf 'Error: duplicate external installer in module %s: %s\n' \
+                printf 'Error: invalid external installer in module %s: %s\n' \
                     "$requested_module" \
                     "$installer_id" >&2
 
@@ -333,9 +245,6 @@ load_module() {
         if service_output="$(module_services)"; then
             :
         else
-            printf 'Error: unable to read service requirements for module: %s\n' \
-                "$requested_module" >&2
-
             reset_module_contract
             return 1
         fi
@@ -343,16 +252,12 @@ load_module() {
         while IFS= read -r service_requirement; do
             [[ -z "$service_requirement" ]] && continue
 
-            if parse_service_requirement \
+            if ! parse_service_requirement \
                 "$service_requirement" \
                 service_name \
                 enabled_state \
                 active_state \
                 restart_policy; then
-                :
-            else
-                printf 'Error: invalid service requirement in module %s.\n' \
-                    "$requested_module" >&2
 
                 reset_module_contract
                 return 1
@@ -368,6 +273,7 @@ load_module() {
             fi
 
             seen_services["$service_name"]=1
+
             LWBS_MODULE_SERVICES+=(
                 "$service_name $enabled_state $active_state $restart_policy"
             )
@@ -380,9 +286,6 @@ load_module() {
         if configuration_output="$(module_configurations)"; then
             :
         else
-            printf 'Error: unable to read configuration requirements for module: %s\n' \
-                "$requested_module" >&2
-
             reset_module_contract
             return 1
         fi
@@ -390,7 +293,7 @@ load_module() {
         while IFS= read -r configuration_requirement; do
             [[ -z "$configuration_requirement" ]] && continue
 
-            if parse_configuration_requirement \
+            if ! parse_configuration_requirement \
                 "$configuration_requirement" \
                 configuration_id \
                 configuration_kind \
@@ -399,17 +302,13 @@ load_module() {
                 configuration_source \
                 configuration_mode \
                 configuration_backup; then
-                :
-            else
-                printf 'Error: invalid configuration requirement in module %s.\n' \
-                    "$requested_module" >&2
 
                 reset_module_contract
                 return 1
             fi
 
             if [[ -n "${seen_configurations[$configuration_id]+defined}" ]]; then
-                printf 'Error: duplicate managed configuration in module %s: %s\n' \
+                printf 'Error: duplicate configuration in module %s: %s\n' \
                     "$requested_module" \
                     "$configuration_id" >&2
 
@@ -422,11 +321,82 @@ load_module() {
         done <<<"$configuration_output"
     fi
 
+    LWBS_MODULE_GROUP_MEMBERSHIPS=()
+
+    if declare -F module_group_memberships >/dev/null 2>&1; then
+        if group_output="$(module_group_memberships)"; then
+            :
+        else
+            reset_module_contract
+            return 1
+        fi
+
+        while IFS= read -r group_name; do
+            [[ -z "$group_name" ]] && continue
+
+            if [[ ! "$group_name" =~ ^[a-z_][a-z0-9_-]*$ ]]; then
+                printf 'Error: invalid group requirement in module %s: %s\n' \
+                    "$requested_module" \
+                    "$group_name" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            if [[ -n "${seen_groups[$group_name]+defined}" ]]; then
+                printf 'Error: duplicate group requirement in module %s: %s\n' \
+                    "$requested_module" \
+                    "$group_name" >&2
+
+                reset_module_contract
+                return 1
+            fi
+
+            seen_groups["$group_name"]=1
+            LWBS_MODULE_GROUP_MEMBERSHIPS+=("$group_name")
+        done <<<"$group_output"
+    fi
+
+    LWBS_MODULE_RESTART_REQUIREMENTS=()
+
+    if declare -F module_restart_requirements >/dev/null 2>&1; then
+        if restart_output="$(module_restart_requirements)"; then
+            :
+        else
+            reset_module_contract
+            return 1
+        fi
+
+        while IFS= read -r restart_requirement; do
+            [[ -z "$restart_requirement" ]] && continue
+
+            if ! parse_restart_requirement \
+                "$restart_requirement" \
+                restart_type \
+                restart_target \
+                restart_reason; then
+
+                reset_module_contract
+                return 1
+            fi
+
+            restart_requirement="$restart_type|$restart_target|$restart_reason"
+
+            if [[ -n "${seen_restart_requirements[$restart_requirement]+defined}" ]]; then
+                continue
+            fi
+
+            seen_restart_requirements["$restart_requirement"]=1
+            LWBS_MODULE_RESTART_REQUIREMENTS+=("$restart_requirement")
+        done <<<"$restart_output"
+    fi
+
     if ((${#LWBS_MODULE_CAPABILITIES[@]} == 0 && \
         ${#LWBS_MODULE_DEPENDENCIES[@]} == 0 && \
         ${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} == 0 && \
         ${#LWBS_MODULE_SERVICES[@]} == 0 && \
-        ${#LWBS_MODULE_CONFIGURATIONS[@]} == 0)) &&
+        ${#LWBS_MODULE_CONFIGURATIONS[@]} == 0 && \
+        ${#LWBS_MODULE_GROUP_MEMBERSHIPS[@]} == 0)) &&
             ! declare -F module_apply >/dev/null 2>&1 &&
             ! declare -F module_verify >/dev/null 2>&1; then
 
@@ -440,7 +410,7 @@ load_module() {
     LWBS_MODULE_PATH="$module_path"
 
     log_info \
-        "Module loaded: id=$LWBS_MODULE_ID capability_count=${#LWBS_MODULE_CAPABILITIES[@]} dependency_count=${#LWBS_MODULE_DEPENDENCIES[@]} conflict_count=${#LWBS_MODULE_CONFLICTS[@]} external_count=${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} service_count=${#LWBS_MODULE_SERVICES[@]} configuration_count=${#LWBS_MODULE_CONFIGURATIONS[@]}"
+        "Module loaded: id=$LWBS_MODULE_ID capability_count=${#LWBS_MODULE_CAPABILITIES[@]} dependency_count=${#LWBS_MODULE_DEPENDENCIES[@]} conflict_count=${#LWBS_MODULE_CONFLICTS[@]} external_count=${#LWBS_MODULE_EXTERNAL_INSTALLERS[@]} service_count=${#LWBS_MODULE_SERVICES[@]} configuration_count=${#LWBS_MODULE_CONFIGURATIONS[@]} group_count=${#LWBS_MODULE_GROUP_MEMBERSHIPS[@]} restart_count=${#LWBS_MODULE_RESTART_REQUIREMENTS[@]}"
 
     return 0
 }
@@ -473,15 +443,9 @@ collect_missing_module_packages() {
     local package_state
     local exit_code
 
-    if [[ -z "$result_name" ]]; then
-        printf 'Error: no output array was provided for package-state evaluation.\n' \
-            >&2
-        return 2
-    fi
+    if [[ -z "$result_name" ||
+        ! "$result_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
 
-    if [[ ! "$result_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
-        printf 'Error: invalid output array name for package-state evaluation: %s\n' \
-            "$result_name" >&2
         return 2
     fi
 
@@ -496,13 +460,6 @@ collect_missing_module_packages() {
             :
         else
             exit_code=$?
-
-            printf 'Error: unable to determine package state: %s\n' \
-                "$package" >&2
-
-            log_error \
-                "Package state check failed: module=$LWBS_MODULE_ID package=$package exit_code=$exit_code"
-
             return "$exit_code"
         fi
 
@@ -517,10 +474,6 @@ collect_missing_module_packages() {
                 ;;
 
             *)
-                printf 'Error: distribution adapter returned invalid package state "%s" for %s.\n' \
-                    "$package_state" \
-                    "$package" >&2
-
                 return 1
                 ;;
         esac
@@ -537,46 +490,33 @@ execute_loaded_module() {
     local -a missing_packages=()
 
     if [[ -z "$LWBS_MODULE_ID" ]]; then
-        printf 'Error: no module is currently loaded.\n' >&2
         return 2
     fi
 
-    if [[ -z "${DISTRO_ADAPTER_PROFILE:-}" ]]; then
-        printf 'Error: a distribution adapter must be loaded before executing modules.\n' \
-            >&2
-        return 1
-    fi
+    if [[ -z "${DISTRO_ADAPTER_PROFILE:-}" ||
+        -z "${LWBS_CAPABILITY_PROFILE:-}" ]]; then
 
-    if [[ -z "${LWBS_CAPABILITY_PROFILE:-}" ]]; then
-        printf 'Error: a capability mapping must be loaded before executing modules.\n' \
-            >&2
         return 1
     fi
 
     if ((${#LWBS_MODULE_SERVICES[@]} > 0 || \
-        ${#LWBS_MODULE_CONFIGURATIONS[@]} > 0)); then
+        ${#LWBS_MODULE_CONFIGURATIONS[@]} > 0 || \
+        ${#LWBS_MODULE_GROUP_MEMBERSHIPS[@]} > 0)); then
 
-        printf 'Error: modules with managed service or configuration requirements must execute through the planning framework.\n' \
+        printf 'Error: managed services, configurations, and group memberships require the planning framework.\n' \
             >&2
+
         return 1
     fi
 
     if ((${#LWBS_MODULE_CAPABILITIES[@]} > 0)); then
-        if resolve_capabilities \
+        resolve_capabilities \
             resolved_packages \
-            "${LWBS_MODULE_CAPABILITIES[@]}"; then
-            :
-        else
-            return $?
-        fi
+            "${LWBS_MODULE_CAPABILITIES[@]}" || return $?
 
-        if collect_missing_module_packages \
+        collect_missing_module_packages \
             missing_packages \
-            "${resolved_packages[@]}"; then
-            :
-        else
-            return $?
-        fi
+            "${resolved_packages[@]}" || return $?
 
         if ((${#missing_packages[@]} > 0)); then
             distro_install_packages "${missing_packages[@]}"
@@ -623,6 +563,8 @@ reset_module_contract() {
         module_external_installers \
         module_services \
         module_configurations \
+        module_group_memberships \
+        module_restart_requirements \
         module_preflight_requirements \
         module_apply \
         module_verify \
@@ -632,10 +574,13 @@ reset_module_contract() {
     LWBS_MODULE_NAME=""
     LWBS_MODULE_DESCRIPTION=""
     LWBS_MODULE_PATH=""
+
     LWBS_MODULE_CAPABILITIES=()
     LWBS_MODULE_DEPENDENCIES=()
     LWBS_MODULE_CONFLICTS=()
     LWBS_MODULE_EXTERNAL_INSTALLERS=()
     LWBS_MODULE_SERVICES=()
     LWBS_MODULE_CONFIGURATIONS=()
+    LWBS_MODULE_GROUP_MEMBERSHIPS=()
+    LWBS_MODULE_RESTART_REQUIREMENTS=()
 }

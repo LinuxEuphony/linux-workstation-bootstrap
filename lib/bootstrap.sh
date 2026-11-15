@@ -25,11 +25,17 @@ source "$LWBS_ROOT/lib/core.sh"
 # shellcheck source=./execution.sh
 source "$LWBS_ROOT/lib/execution.sh"
 
+# shellcheck source=./lock.sh
+source "$LWBS_ROOT/lib/lock.sh"
+
 # shellcheck source=./recovery.sh
 source "$LWBS_ROOT/lib/recovery.sh"
 
 # shellcheck source=./restart.sh
 source "$LWBS_ROOT/lib/restart.sh"
+
+# shellcheck source=./account.sh
+source "$LWBS_ROOT/lib/account.sh"
 
 # shellcheck source=./service.sh
 source "$LWBS_ROOT/lib/service.sh"
@@ -106,11 +112,26 @@ bootstrap_main() {
             ;;
     esac
 
+    if ! initialize_application_state; then
+        return 1
+    fi
+
+    if acquire_execution_lock; then
+        :
+    else
+        return $?
+    fi
+
+    lock_install_exit_handler
+
     if init_logging; then
         :
     else
         return $?
     fi
+
+    log_info \
+        "Bootstrap execution lock acquired: pid=$LWBS_LOCK_OWNER_PID"
 
     show_startup_info
 
@@ -140,6 +161,12 @@ bootstrap_main() {
 
     if ! validate_runtime; then
         log_error "Runtime validation failed."
+        show_failure_info
+        return 1
+    fi
+
+    if ! initialize_target_workstation_user; then
+        log_error "Target workstation user resolution failed."
         show_failure_info
         return 1
     fi
@@ -207,6 +234,9 @@ bootstrap_main() {
 
     printf 'Selected workstation profile: %s\n' \
         "$workstation_profile"
+
+    printf 'Target workstation user: %s\n' \
+        "$LWBS_TARGET_USER"
 
     log_info \
         "Selected workstation profile: $workstation_profile"

@@ -5,36 +5,6 @@
 #
 # Bootstrap preflight validation.
 #
-# Preflight evaluates the fully resolved workstation plan before any
-# installation or configuration action begins.
-#
-# The layer:
-# 1. Validates the selected distribution adapter and environment.
-# 2. Validates the selected distro and architecture combination.
-# 3. Verifies persistent state and logging paths remain usable.
-# 4. Verifies privilege escalation when planned actions require it.
-# 5. Verifies service-manager availability for planned service changes.
-# 6. Supports declarative module and external-installer requirements.
-# 7. Performs network probes only when a planned action explicitly requires
-#    network connectivity.
-# 8. Aggregates blocking failures rather than stopping at the first problem.
-#
-# Supported contributed requirements:
-#
-#   privilege
-#   command:<command>
-#   network:<host>:<port>
-#
-# Modules may optionally expose:
-#
-#   module_preflight_requirements
-#
-# External installers may optionally expose:
-#
-#   external_preflight_requirements
-#
-# Requirement functions must be read-only and print one requirement per line.
-#
 # shellcheck disable=SC2154,SC2317,SC2329
 
 LWBS_PREFLIGHT_STATUS="empty"
@@ -53,9 +23,7 @@ reset_preflight_state() {
 preflight_add_failure() {
     local message="${1:-}"
 
-    if [[ -z "$message" ]]; then
-        return 2
-    fi
+    [[ -n "$message" ]] || return 2
 
     if [[ -n "${LWBS_PREFLIGHT_FAILURE_SET[$message]+defined}" ]]; then
         return 0
@@ -67,8 +35,6 @@ preflight_add_failure() {
     if [[ -n "${LWBS_LOG_FILE:-}" ]]; then
         log_error "Preflight failure: $message" || true
     fi
-
-    return 0
 }
 
 preflight_is_root() {
@@ -83,9 +49,7 @@ preflight_architecture_is_supported() {
 
     supported_architectures="${LWBS_DISTRO_SUPPORTED_ARCHITECTURES["$distro_profile"]:-}"
 
-    if [[ -z "$supported_architectures" ]]; then
-        return 1
-    fi
+    [[ -n "$supported_architectures" ]] || return 1
 
     for supported_architecture in $supported_architectures; do
         if [[ "$architecture" == "$supported_architecture" ]]; then
@@ -103,62 +67,47 @@ preflight_check_architecture() {
     if [[ -z "$distro_profile" ]]; then
         preflight_add_failure \
             "The resolved execution plan does not identify a distribution profile."
-
-        return 0
+        return
     fi
 
     if [[ -z "$architecture" ]]; then
         preflight_add_failure \
             "System architecture detection is unavailable."
-
-        return 0
+        return
     fi
 
-    if preflight_architecture_is_supported \
+    if ! preflight_architecture_is_supported \
         "$distro_profile" \
         "$architecture"; then
 
-        return 0
+        preflight_add_failure \
+            "Architecture $architecture is not supported by the $distro_profile installation profile."
     fi
-
-    preflight_add_failure \
-        "Architecture $architecture is not supported by the $distro_profile installation profile."
-
-    return 0
 }
 
 preflight_check_distro_adapter() {
     if [[ -z "${DISTRO_ADAPTER_PROFILE:-}" ]]; then
         preflight_add_failure \
             "No distribution adapter is loaded."
-
-        return 0
+        return
     fi
 
     if [[ "${LWBS_PLAN_DISTRO_PROFILE:-}" != "$DISTRO_ADAPTER_PROFILE" ]]; then
         preflight_add_failure \
             "The resolved plan distribution does not match the loaded distribution adapter."
-
-        return 0
+        return
     fi
 
-    if validate_distro_adapter; then
-        :
-    else
+    if ! validate_distro_adapter; then
         preflight_add_failure \
             "The selected distribution adapter does not satisfy the required adapter contract."
-
-        return 0
+        return
     fi
 
-    if distro_validate_environment; then
-        :
-    else
+    if ! distro_validate_environment; then
         preflight_add_failure \
             "The selected distribution adapter environment is not ready for execution."
     fi
-
-    return 0
 }
 
 preflight_check_logging_paths() {
@@ -185,8 +134,6 @@ preflight_check_logging_paths() {
         preflight_add_failure \
             "Session log file is unavailable or not writable: ${LWBS_LOG_FILE:-unset}"
     fi
-
-    return 0
 }
 
 preflight_module_has_service_actions() {
@@ -197,7 +144,6 @@ preflight_module_has_service_actions() {
     local active_state
     local restart_policy
     local service_key
-    local planned_action
 
     while IFS= read -r service_requirement; do
         [[ -z "$service_requirement" ]] && continue
@@ -215,9 +161,7 @@ preflight_module_has_service_actions() {
                 "$service_name"
         )"
 
-        planned_action="${LWBS_PLAN_SERVICE_ACTIONS[$service_key]:-skip}"
-
-        if [[ "$planned_action" != "skip" ]]; then
+        if [[ "${LWBS_PLAN_SERVICE_ACTIONS[$service_key]:-skip}" != "skip" ]]; then
             return 0
         fi
     done <<<"${LWBS_PLAN_MODULE_SERVICES[$module_id]:-}"
@@ -229,6 +173,10 @@ preflight_module_has_actions() {
     local module_id="${1:-}"
 
     if module_has_planned_changes "$module_id"; then
+        return 0
+    fi
+
+    if account_module_has_planned_actions "$module_id"; then
         return 0
     fi
 
@@ -256,32 +204,54 @@ preflight_plan_requires_privilege() {
         return 0
     fi
 
+    if account_plan_requires_privilege; then
+        return 0
+    fi
+
     return 1
 }
 
 preflight_require_privilege() {
     local owner="${1:-Execution plan}"
 
-    if preflight_is_root; then
-        return 0
-    fi
-
-    if command_exists sudo; then
+    if preflight_is_root || command_exists sudo; then
         return 0
     fi
 
     preflight_add_failure \
         "$owner requires root privileges, but sudo is unavailable."
-
-    return 0
 }
 
 preflight_check_required_privilege() {
-    if ! preflight_plan_requires_privilege; then
+    if preflight_plan_requires_privilege; then
+        preflight_require_privilege "Execution plan"
+    fi
+}
+
+preflight_check_account_requirements() {
+    if ((LWBS_PLAN_ACCOUNT_ACTION_COUNT == 0)); then
         return 0
     fi
 
-    preflight_require_privilege "Execution plan"
+    if [[ -z "$LWBS_TARGET_USER" ]]; then
+        preflight_add_failure \
+            "The execution plan contains account changes, but the target workstation user is unavailable."
+    fi
+
+    if ! command_exists id; then
+        preflight_add_failure \
+            "Managed user and group operations require the id command."
+    fi
+
+    if ! command_exists getent; then
+        preflight_add_failure \
+            "Managed user and group operations require the getent command."
+    fi
+
+    if ! account_usermod_command >/dev/null 2>&1; then
+        preflight_add_failure \
+            "Managed group membership changes require the usermod command."
+    fi
 }
 
 preflight_check_service_manager() {
@@ -289,14 +259,10 @@ preflight_check_service_manager() {
         return 0
     fi
 
-    if service_manager_available; then
-        return 0
+    if ! service_manager_available; then
+        preflight_add_failure \
+            "The execution plan contains service changes, but the systemd service manager is unavailable."
     fi
-
-    preflight_add_failure \
-        "The execution plan contains service changes, but the systemd service manager is unavailable."
-
-    return 0
 }
 
 preflight_network_available() {
@@ -330,14 +296,12 @@ preflight_check_network_requirement() {
     local host="${2:-}"
     local port="${3:-}"
     local probe_key
-    local previous_result
 
     probe_key="$host:$port"
-    previous_result="${LWBS_PREFLIGHT_NETWORK_PROBES[$probe_key]:-}"
 
-    case "$previous_result" in
+    case "${LWBS_PREFLIGHT_NETWORK_PROBES[$probe_key]:-}" in
         passed | failed)
-            return 0
+            return
             ;;
     esac
 
@@ -347,26 +311,22 @@ preflight_check_network_requirement() {
         preflight_add_failure \
             "$owner requires network validation for $probe_key, but the timeout command is unavailable."
 
-        return 0
+        return
     fi
 
     if preflight_network_available "$host" "$port"; then
         LWBS_PREFLIGHT_NETWORK_PROBES["$probe_key"]="passed"
 
-        if [[ -n "${LWBS_LOG_FILE:-}" ]]; then
-            log_info \
-                "Preflight network probe succeeded: target=$probe_key owner=$owner"
-        fi
+        log_info \
+            "Preflight network probe succeeded: target=$probe_key owner=$owner"
 
-        return 0
+        return
     fi
 
     LWBS_PREFLIGHT_NETWORK_PROBES["$probe_key"]="failed"
 
     preflight_add_failure \
         "$owner requires network connectivity to $probe_key, but the endpoint is unreachable."
-
-    return 0
 }
 
 preflight_process_requirement() {
@@ -376,13 +336,6 @@ preflight_process_requirement() {
     local network_target
     local host
     local port
-
-    if [[ -z "$owner" || -z "$requirement" ]]; then
-        preflight_add_failure \
-            "An empty preflight requirement was declared."
-
-        return 0
-    fi
 
     case "$requirement" in
         privilege)
@@ -395,8 +348,7 @@ preflight_process_requirement() {
             if [[ ! "$command_name" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
                 preflight_add_failure \
                     "$owner declared an invalid command requirement: $requirement"
-
-                return 0
+                return
             fi
 
             if ! command_exists "$command_name"; then
@@ -407,26 +359,18 @@ preflight_process_requirement() {
 
         network:*)
             network_target="${requirement#network:}"
-
-            if [[ "$network_target" != *:* ]]; then
-                preflight_add_failure \
-                    "$owner declared an invalid network requirement: $requirement"
-
-                return 0
-            fi
-
             host="${network_target%:*}"
             port="${network_target##*:}"
 
-            if [[ ! "$host" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ||
+            if [[ "$network_target" != *:* ||
+                ! "$host" =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ ||
                 ! "$port" =~ ^[0-9]+$ ||
                 "$port" -lt 1 ||
                 "$port" -gt 65535 ]]; then
 
                 preflight_add_failure \
                     "$owner declared an invalid network requirement: $requirement"
-
-                return 0
+                return
             fi
 
             preflight_check_network_requirement \
@@ -440,20 +384,12 @@ preflight_process_requirement() {
                 "$owner declared an unsupported preflight requirement: $requirement"
             ;;
     esac
-
-    return 0
 }
 
 preflight_read_module_requirements() (
     local module_id="${1:-}"
-    local exit_code
 
-    if load_module "$module_id"; then
-        :
-    else
-        exit_code=$?
-        exit "$exit_code"
-    fi
+    load_module "$module_id" || exit $?
 
     if declare -F module_preflight_requirements >/dev/null 2>&1; then
         module_preflight_requirements
@@ -485,10 +421,8 @@ preflight_collect_module_requirements() {
             preflight_add_failure \
                 "Unable to evaluate preflight requirements for module $module_id."
 
-            if [[ -n "${LWBS_LOG_FILE:-}" ]]; then
-                log_error \
-                    "Module preflight requirement evaluation failed: module=$module_id exit_code=$exit_code"
-            fi
+            log_error \
+                "Module preflight requirement evaluation failed: module=$module_id exit_code=$exit_code"
 
             continue
         fi
@@ -501,20 +435,12 @@ preflight_collect_module_requirements() {
                 "$requirement"
         done <<<"$requirements"
     done
-
-    return 0
 }
 
 preflight_read_external_requirements() (
     local installer_id="${1:-}"
-    local exit_code
 
-    if load_external_installer "$installer_id"; then
-        :
-    else
-        exit_code=$?
-        exit "$exit_code"
-    fi
+    load_external_installer "$installer_id" || exit $?
 
     if declare -F external_preflight_requirements >/dev/null 2>&1; then
         external_preflight_requirements
@@ -554,10 +480,8 @@ preflight_collect_external_requirements() {
                 preflight_add_failure \
                     "Unable to evaluate preflight requirements for external installer $installer_id."
 
-                if [[ -n "${LWBS_LOG_FILE:-}" ]]; then
-                    log_error \
-                        "External preflight requirement evaluation failed: installer=$installer_id exit_code=$exit_code"
-                fi
+                log_error \
+                    "External preflight requirement evaluation failed: installer=$installer_id exit_code=$exit_code"
 
                 continue
             fi
@@ -571,8 +495,6 @@ preflight_collect_external_requirements() {
             done <<<"$requirements"
         done <<<"${LWBS_PLAN_MODULE_EXTERNALS[$module_id]:-}"
     done
-
-    return 0
 }
 
 show_preflight_result() {
@@ -582,7 +504,7 @@ show_preflight_result() {
 
     if ((${#LWBS_PREFLIGHT_FAILURES[@]} == 0)); then
         printf '  Status       : passed\n\n'
-        return 0
+        return
     fi
 
     printf '  Status       : failed\n'
@@ -593,8 +515,6 @@ show_preflight_result() {
     done
 
     printf '\n'
-
-    return 0
 }
 
 run_preflight_validation() {
@@ -618,6 +538,7 @@ run_preflight_validation() {
     preflight_check_architecture
     preflight_check_logging_paths
     preflight_check_required_privilege
+    preflight_check_account_requirements
     preflight_check_service_manager
     preflight_collect_module_requirements
     preflight_collect_external_requirements
@@ -629,7 +550,6 @@ run_preflight_validation() {
             "Preflight validation failed: failures=${#LWBS_PREFLIGHT_FAILURES[@]}"
 
         show_preflight_result
-
         return 1
     fi
 
@@ -639,8 +559,6 @@ run_preflight_validation() {
         "Preflight validation passed: profile=$LWBS_PLAN_PROFILE_ID"
 
     show_preflight_result
-
-    return 0
 }
 
 validate_profile_preflight() {
@@ -648,7 +566,6 @@ validate_profile_preflight() {
     local exit_code
 
     if [[ -z "$profile_id" ]]; then
-        printf 'Error: preflight requires a workstation profile.\n' >&2
         return 2
     fi
 
@@ -662,11 +579,7 @@ validate_profile_preflight() {
 
         LWBS_PREFLIGHT_STATUS="failed"
 
-        log_error \
-            "Unable to resolve execution plan for preflight: profile=$profile_id exit_code=$exit_code"
-
         reset_execution_plan
-
         return "$exit_code"
     fi
 

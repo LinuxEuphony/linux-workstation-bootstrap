@@ -27,6 +27,8 @@ declare -a TEST_FILES=(
     "$TEST_DIR/test_configuration.sh"
     "$TEST_DIR/test_restart.sh"
     "$TEST_DIR/test_recovery.sh"
+    "$TEST_DIR/test_lock.sh"
+    "$TEST_DIR/test_account.sh"
 )
 
 failed_files=0

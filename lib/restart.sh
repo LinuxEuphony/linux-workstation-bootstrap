@@ -5,32 +5,8 @@
 #
 # Restart and session follow-up requirement tracking.
 #
-# Modules and external installers may declare follow-up actions that become
-# necessary after successful changes.
-#
-# Supported requirement types:
-#
-#   reboot
-#   logout
-#   shell
-#   application
-#
-# Declaration format:
-#
-#   type|target|reason
-#
-# Canonical targets:
-#
-#   reboot      -> system
-#   logout      -> user-session
-#   shell       -> current-shell
-#   application -> application display name or identifier
-#
 # Restart requirements are informational only. This framework never performs
 # a reboot, logout, shell termination, or application restart.
-#
-# SC2178 is disabled because this file intentionally uses dynamic namerefs
-# that may reference either indexed or associative arrays.
 #
 # shellcheck disable=SC2154,SC2178
 
@@ -73,7 +49,6 @@ parse_restart_requirement() {
         -z "$target_name" ||
         -z "$reason_name" ]]; then
 
-        printf 'Error: incomplete restart requirement parser request.\n' >&2
         return 2
     fi
 
@@ -84,54 +59,32 @@ parse_restart_requirement() {
         extra <<<"$requirement"
 
     if [[ -n "$extra" ]]; then
-        printf 'Error: restart requirement has too many fields.\n' >&2
         return 1
     fi
 
     case "$parsed_type" in
         reboot)
-            if [[ "$parsed_target" != "system" ]]; then
-                printf 'Error: reboot requirement target must be "system".\n' \
-                    >&2
-                return 1
-            fi
+            [[ "$parsed_target" == "system" ]] || return 1
             ;;
 
         logout)
-            if [[ "$parsed_target" != "user-session" ]]; then
-                printf 'Error: logout requirement target must be "user-session".\n' \
-                    >&2
-                return 1
-            fi
+            [[ "$parsed_target" == "user-session" ]] || return 1
             ;;
 
         shell)
-            if [[ "$parsed_target" != "current-shell" ]]; then
-                printf 'Error: shell restart requirement target must be "current-shell".\n' \
-                    >&2
-                return 1
-            fi
+            [[ "$parsed_target" == "current-shell" ]] || return 1
             ;;
 
         application)
-            if [[ -z "$parsed_target" ]]; then
-                printf 'Error: application restart requirement requires an application target.\n' \
-                    >&2
-                return 1
-            fi
+            [[ -n "$parsed_target" ]] || return 1
             ;;
 
         *)
-            printf 'Error: unsupported restart requirement type: %s\n' \
-                "$parsed_type" >&2
             return 1
             ;;
     esac
 
-    if [[ -z "$parsed_reason" ]]; then
-        printf 'Error: restart requirement requires a reason.\n' >&2
-        return 1
-    fi
+    [[ -n "$parsed_reason" ]] || return 1
 
     local -n type_ref="$type_name"
     local -n target_ref="$target_name"
@@ -189,8 +142,6 @@ restart_add_to_collection() {
     else
         reasons_map_ref["$requirement_key"]="$reason"
     fi
-
-    return 0
 }
 
 restart_add_planned_requirement() {
@@ -219,10 +170,6 @@ restart_add_recorded_requirement() {
     local target="${2:-}"
     local reason="${3:-}"
 
-    local before_count
-
-    before_count="${#LWBS_RESTART_KEYS[@]}"
-
     restart_add_to_collection \
         LWBS_RESTART_KEYS \
         LWBS_RESTART_TYPE \
@@ -233,13 +180,8 @@ restart_add_recorded_requirement() {
         "$target" \
         "$reason"
 
-    if ((${#LWBS_RESTART_KEYS[@]} > before_count)); then
-        log_info \
-            "Follow-up requirement recorded: type=$requirement_type target=$target reason=$reason"
-    else
-        log_info \
-            "Follow-up requirement updated: type=$requirement_type target=$target reason=$reason"
-    fi
+    log_info \
+        "Follow-up requirement recorded: type=$requirement_type target=$target reason=$reason"
 }
 
 restart_module_has_planned_changes() {
@@ -262,6 +204,10 @@ restart_module_has_planned_changes() {
     fi
 
     if module_has_planned_configuration_changes "$module_id"; then
+        return 0
+    fi
+
+    if account_module_has_planned_actions "$module_id"; then
         return 0
     fi
 
@@ -317,7 +263,7 @@ restart_module_execution_changed() {
         fi
 
         case "${LWBS_RESULT_TYPE[$result_key]:-}" in
-            package | external | configuration | service)
+            package | external | configuration | group | service)
                 if [[ "${LWBS_RESULT_STATUS[$result_key]:-}" == "successful" ]]; then
                     return 0
                 fi
@@ -336,15 +282,11 @@ plan_module_restart_requirements() {
     local reason
 
     for requirement in "${LWBS_MODULE_RESTART_REQUIREMENTS[@]}"; do
-        if parse_restart_requirement \
+        parse_restart_requirement \
             "$requirement" \
             requirement_type \
             target \
-            reason; then
-            :
-        else
-            return $?
-        fi
+            reason || return $?
 
         append_execution_plan_value \
             LWBS_PLAN_MODULE_RESTART_REQUIREMENTS \
@@ -358,8 +300,6 @@ plan_module_restart_requirements() {
                 "$reason"
         fi
     done
-
-    return 0
 }
 
 plan_external_restart_requirements() {
@@ -377,15 +317,11 @@ plan_external_restart_requirements() {
     fi
 
     for requirement in "${LWBS_EXTERNAL_RESTART_REQUIREMENTS[@]}"; do
-        if parse_restart_requirement \
+        parse_restart_requirement \
             "$requirement" \
             requirement_type \
             target \
-            reason; then
-            :
-        else
-            return $?
-        fi
+            reason || return $?
 
         append_execution_plan_value \
             LWBS_PLAN_EXTERNAL_RESTART_REQUIREMENTS \
@@ -402,8 +338,6 @@ plan_external_restart_requirements() {
 
     log_info \
         "External restart requirements planned: module=$module_id installer=$installer_id count=${#LWBS_EXTERNAL_RESTART_REQUIREMENTS[@]}"
-
-    return 0
 }
 
 record_external_restart_requirements() {
@@ -419,15 +353,11 @@ record_external_restart_requirements() {
     while IFS= read -r requirement; do
         [[ -z "$requirement" ]] && continue
 
-        if parse_restart_requirement \
+        parse_restart_requirement \
             "$requirement" \
             requirement_type \
             target \
-            reason; then
-            :
-        else
-            return $?
-        fi
+            reason || return $?
 
         restart_add_recorded_requirement \
             "$requirement_type" \
@@ -437,8 +367,6 @@ record_external_restart_requirements() {
 
     log_info \
         "External follow-up requirements recorded: module=$module_id installer=$installer_id"
-
-    return 0
 }
 
 record_module_restart_requirements() {
@@ -455,23 +383,17 @@ record_module_restart_requirements() {
     while IFS= read -r requirement; do
         [[ -z "$requirement" ]] && continue
 
-        if parse_restart_requirement \
+        parse_restart_requirement \
             "$requirement" \
             requirement_type \
             target \
-            reason; then
-            :
-        else
-            return $?
-        fi
+            reason || return $?
 
         restart_add_recorded_requirement \
             "$requirement_type" \
             "$target" \
             "$reason"
     done <<<"${LWBS_PLAN_MODULE_RESTART_REQUIREMENTS[$module_id]:-}"
-
-    return 0
 }
 
 restart_requirement_label() {
